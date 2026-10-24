@@ -26,7 +26,11 @@
 
     cl-log-kit = {
       url = "github:nerima-lisp/cl-log-kit/v2.2.0";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        cl-concurrent-kit.follows = "cl-concurrent-kit";
+        cl-date-kit.follows = "cl-concurrent-kit/cl-date-kit";
+      };
     };
 
     cl-weave = {
