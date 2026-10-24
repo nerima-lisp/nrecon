@@ -17,8 +17,9 @@
   metadata)
 
 (defun make-result (&key job-id (status :completed) value metadata)
-  (unless (member status '(:completed :failed) :test #'eq)
-    (error "Result status must be :COMPLETED or :FAILED, got ~S." status))
+  (unless (member status '(:completed :failed :cancelled :timed-out) :test #'eq)
+    (error "Result status must be :COMPLETED, :FAILED, :CANCELLED, or :TIMED-OUT, got ~S."
+           status))
   (%make-result :job-id job-id
                 :status status
                 :value value

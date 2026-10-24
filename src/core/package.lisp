@@ -37,4 +37,11 @@
    #:authorize-action
    #:cps-pipeline
    #:make-cps-pipeline
-   #:run-cps-pipeline))
+   #:run-cps-pipeline
+   #:pipeline-run-control
+   #:make-pipeline-run-control
+   #:pipeline-run-control-timeout
+   #:pipeline-run-cancelled-p
+   #:cancel-pipeline-run
+   #:current-pipeline-run-control
+   #:run-cps-pipeline-batch))

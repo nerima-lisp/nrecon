@@ -21,7 +21,11 @@
       (expect (job-target job) :to-equal "lab.example")
       (expect (result-job-id result) :to-equal "job-1")
       (expect (result-status result) :to-be :completed)
-      (expect (result-value result) :to-equal '(:hosts ("lab.example"))))))
+      (expect (result-value result) :to-equal '(:hosts ("lab.example")))
+      (expect (result-status (make-result :status :cancelled))
+              :to-be :cancelled)
+      (expect (result-status (make-result :status :timed-out))
+              :to-be :timed-out))))
 
 (describe "module declarations"
   (it "registers module metadata and its run continuation"
@@ -169,6 +173,130 @@
                (cl-dataflow-kit:make-edge
                 "right" "merge" :from-port "value" :to-port "right")))))
       (expect (run-cps-pipeline pipeline 0 :parallel t) :to-be 3))))
+(describe "CPS pipeline run controls"
+  (it "bounds batch concurrency and preserves completion records"
+    (let* ((barrier (cl-concurrent-kit:make-barrier 2))
+           (barrier-timeout (cl-date-kit:duration-of-seconds 3))
+           (counter-lock (cl-concurrent-kit:make-lock))
+           (active 0)
+           (peak 0)
+           (pipeline
+             (make-cps-pipeline
+              (list
+               (lambda (input context)
+                 (declare (ignore context))
+                 (cl-concurrent-kit:with-lock-held (counter-lock)
+                   (incf active)
+                   (setf peak (max peak active)))
+                 (unwind-protect
+                      (progn
+                        (cl-concurrent-kit:await-barrier
+                         barrier :timeout barrier-timeout)
+                        input)
+                   (cl-concurrent-kit:with-lock-held (counter-lock)
+                     (decf active))))))))
+      (multiple-value-bind (batch control)
+          (run-cps-pipeline-batch
+           pipeline '(1 2 3 4)
+           :max-in-flight 2
+           :buffer-size 1)
+        (declare (ignore control))
+        (let ((results (cl-concurrent-kit:await batch)))
+          (expect (mapcar #'result-status results)
+                  :to-equal '(:completed :completed :completed :completed))
+          (expect (mapcar #'result-value results) :to-equal '(1 2 3 4))
+          (expect peak :to-be 2)))))
+  (it "times out one probe without cancelling its sibling"
+    (let* ((pending (cl-concurrent-kit:make-promise))
+           (direct-pending (cl-concurrent-kit:make-promise))
+           (timeout (cl-date-kit:duration-of-seconds 1))
+           (slow-control nil)
+           (direct-stage-control nil)
+           (later-runs 0)
+           (pipeline
+             (make-cps-pipeline
+              (list
+               (lambda (input context)
+                 (declare (ignore context))
+                 (case input
+                   (:slow
+                    (setf slow-control (current-pipeline-run-control))
+                    pending)
+                   (:direct-slow
+                    (setf direct-stage-control
+                          (current-pipeline-run-control))
+                    direct-pending)
+                   (otherwise input)))
+               (lambda (input context)
+                 (declare (ignore context))
+                 (incf later-runs)
+                 input)))))
+      (let* ((direct-control (make-pipeline-run-control :timeout timeout))
+             (direct-run
+               (run-cps-pipeline pipeline :direct-slow
+                                 :control direct-control))
+             (direct-result (cl-concurrent-kit:await direct-run)))
+        (expect (result-status direct-result) :to-be :timed-out)
+        (expect (result-value direct-result) :to-be :direct-slow)
+        (expect (eq direct-stage-control direct-control) :to-be t)
+        (expect (pipeline-run-cancelled-p direct-control) :to-be t)
+        (cl-concurrent-kit:deliver direct-pending :late))
+      (multiple-value-bind (batch control)
+          (run-cps-pipeline-batch
+           pipeline '(:slow :fast)
+           :max-in-flight 2
+           :probe-timeout timeout)
+        (let ((results (cl-concurrent-kit:await batch)))
+          (expect (result-status (first results)) :to-be :timed-out)
+          (expect (result-value (first results)) :to-be :slow)
+          (expect (result-status (second results)) :to-be :completed)
+          (expect (result-value (second results)) :to-be :fast)
+          (expect (pipeline-run-cancelled-p control) :to-be nil)
+          (expect (pipeline-run-cancelled-p slow-control) :to-be t)
+          (expect (pipeline-run-control-timeout slow-control) :to-be timeout)
+          (cl-concurrent-kit:deliver pending :late)
+          (expect later-runs :to-be 1)))))
+  (it "cancels in-flight and queued probes before later side effects"
+    (let* ((barrier (cl-concurrent-kit:make-barrier 3))
+       (barrier-timeout (cl-date-kit:duration-of-seconds 3))
+       (pending-one (cl-concurrent-kit:make-promise))
+       (pending-two (cl-concurrent-kit:make-promise))
+       (starts (cl-concurrent-kit:make-atomic-counter))
+       (later-side-effects (cl-concurrent-kit:make-atomic-counter))
+       (pipeline
+         (make-cps-pipeline
+          (list
+           (lambda (input context)
+             (declare (ignore context))
+             (cl-concurrent-kit:atomic-counter-incf starts)
+             (cl-concurrent-kit:await-barrier
+              barrier :timeout barrier-timeout)
+             (case input
+               (:one pending-one)
+               (:two pending-two)
+               (otherwise input)))
+           (lambda (input context)
+             (declare (ignore context))
+             (cl-concurrent-kit:atomic-counter-incf later-side-effects)
+             input)))))
+      (multiple-value-bind (batch control)
+          (run-cps-pipeline-batch
+           pipeline
+           (quote (:one :two :three :four))
+           :max-in-flight 2
+           :buffer-size 1)
+        (cl-concurrent-kit:await-barrier
+         barrier :timeout barrier-timeout)
+        (expect (cl-concurrent-kit:atomic-counter-value starts) :to-be 2)
+        (expect (cancel-pipeline-run control) :to-be t)
+        (let ((results (cl-concurrent-kit:await batch)))
+          (expect (mapcar (function result-status) results)
+                  :to-equal (quote (:cancelled :cancelled :cancelled :cancelled)))
+          (cl-concurrent-kit:deliver pending-one :one-ready)
+          (cl-concurrent-kit:deliver pending-two :two-ready)
+          (expect (cl-concurrent-kit:atomic-counter-value starts) :to-be 2)
+          (expect (cl-concurrent-kit:atomic-counter-value later-side-effects)
+                  :to-be 0))))))
 
 (describe "authorization policy"
   (it "allows an in-scope lab host under the default lab-only policy"
