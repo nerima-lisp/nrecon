@@ -23,21 +23,25 @@
 
 (defvar *module-registry* (make-hash-table :test #'equal))
 
-(defun %register-module (module)
-  (setf (gethash (module-name module) *module-registry*) module))
+(defun %register-module (module &key replace)
+  (let* ((name (module-name module))
+         (existing (gethash name *module-registry*)))
+    (when (and existing (not replace))
+      (error "Module ~A is already registered." name))
+    (setf (gethash name *module-registry*) module)))
 
-(defmacro define-module (name &key capabilities options run)
+(defmacro define-module (name &key capabilities options run replace)
   (unless (symbolp name)
     (error "DEFINE-MODULE names must be symbols, got ~S." name))
   (unless (symbolp run)
     (error "DEFINE-MODULE requires :RUN to name a function, got ~S." run))
   `(eval-when (:load-toplevel :execute)
      (%register-module
-      (make-module :name ',name
-                   :capabilities ',capabilities
-                   :options ',options
-                   :run #',run)))
-)
+      (make-module :name (quote ,name)
+                   :capabilities (quote ,capabilities)
+                   :options (quote ,options)
+                   :run (function ,run))
+      :replace ,replace)))
 
 (defun find-module (name)
   (gethash (%module-key name) *module-registry*))

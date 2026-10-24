@@ -34,7 +34,35 @@
       (expect (module-capabilities module) :to-equal '(:read))
       (expect (module-options module) :to-equal '(:target))
       (expect (funcall (module-run module) :input nil) :to-be :input)
-      (expect (not (null (member module (list-modules) :test #'eq))) :to-be t))))
+      (expect (not (null (member module (list-modules) :test #'eq))) :to-be t)))
+  (it "rejects duplicate module names unless replacement is explicit"
+    (let ((original (find-module 'core-test-module)))
+      (unwind-protect
+           (progn
+             (expect
+              (handler-case
+                  (progn
+                    (eval (list 'define-module
+                                'core-test-module
+                                :capabilities (list :write)
+                                :run '%test-module-run))
+                    :registered)
+                (error (condition)
+                  (if (search "already registered"
+                              (princ-to-string condition)
+                              :test #'char-equal)
+                      :duplicate
+                      :other-error)))
+              :to-be :duplicate)
+             (expect (find-module 'core-test-module) :to-be original)
+             (eval (list 'define-module
+                         'core-test-module
+                         :capabilities (list :write)
+                         :run '%test-module-run
+                         :replace t))
+             (expect (module-capabilities (find-module 'core-test-module))
+                     :to-equal (list :write)))
+        (nrecon.core::%register-module original :replace t)))))
 
 (describe "CPS dataflow pipelines"
   (it "passes synchronous stage results to the terminal continuation"
