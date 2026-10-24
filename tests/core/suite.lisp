@@ -64,7 +64,111 @@
       (expect (cl-concurrent-kit:promise-p result) :to-be t)
       (expect (cl-concurrent-kit:promise-settled-p result) :to-be nil)
       (cl-concurrent-kit:deliver pending 40)
-      (expect (cl-concurrent-kit:await result) :to-be 42))))
+      (expect (cl-concurrent-kit:await result) :to-be 42)))
+  (it "routes fan-out results into distinct merge ports"
+    (let* ((pipeline
+             (make-cps-pipeline
+              (list
+               (cl-dataflow-kit:make-node
+                "source"
+                :inputs '("input")
+                :outputs '("value")
+                :handler
+                (lambda (input context)
+                  (declare (ignore context))
+                  input))
+               (cl-dataflow-kit:make-node
+                "left"
+                :inputs '("input")
+                :outputs '("value")
+                :handler
+                (lambda (input context)
+                  (declare (ignore context))
+                  (1+ input)))
+               (cl-dataflow-kit:make-node
+                "right"
+                :inputs '("input")
+                :outputs '("value")
+                :handler
+                (lambda (input context)
+                  (declare (ignore context))
+                  (* input 2)))
+               (cl-dataflow-kit:make-node
+                "merge"
+                :inputs '("left" "right")
+                :outputs '("value")
+                :handler
+                (lambda (inputs context)
+                  (declare (ignore context))
+                  (list :left (cdr (assoc "left" inputs :test #'string=))
+                        :right (cdr (assoc "right" inputs :test #'string=))))))
+              :edges
+              (list
+               (cl-dataflow-kit:make-edge
+                "source" "left" :from-port "value" :to-port "input")
+               (cl-dataflow-kit:make-edge
+                "source" "right" :from-port "value" :to-port "input")
+               (cl-dataflow-kit:make-edge
+                "left" "merge" :from-port "value" :to-port "left")
+               (cl-dataflow-kit:make-edge
+                "right" "merge" :from-port "value" :to-port "right")))))
+      (expect (run-cps-pipeline pipeline 10)
+              :to-equal
+              '(:left 11 :right 20))))
+  (it "runs sibling handlers concurrently when requested"
+    (let* ((barrier (cl-concurrent-kit:make-barrier 2))
+           (timeout (cl-date-kit:duration-of-seconds 2))
+           (pipeline
+             (make-cps-pipeline
+              (list
+               (cl-dataflow-kit:make-node
+                "source"
+                :inputs '("input")
+                :outputs '("value")
+                :handler
+                (lambda (input context)
+                  (declare (ignore context))
+                  input))
+               (cl-dataflow-kit:make-node
+                "left"
+                :inputs '("input")
+                :outputs '("value")
+                :handler
+                (lambda (input context)
+                  (declare (ignore context))
+                  (cl-concurrent-kit:await-barrier
+                   barrier :timeout timeout)
+                  (1+ input)))
+               (cl-dataflow-kit:make-node
+                "right"
+                :inputs '("input")
+                :outputs '("value")
+                :handler
+                (lambda (input context)
+                  (declare (ignore context))
+                  (cl-concurrent-kit:await-barrier
+                   barrier :timeout timeout)
+                  (+ input 2)))
+               (cl-dataflow-kit:make-node
+                "merge"
+                :inputs '("left" "right")
+                :outputs '("value")
+                :handler
+                (lambda (inputs context)
+                  (declare (ignore context))
+                  (+ (cdr (assoc "left" inputs :test #'string=))
+                     (cdr (assoc "right" inputs :test #'string=))))))
+              :edges
+              (list
+               (cl-dataflow-kit:make-edge
+                "source" "left" :from-port "value" :to-port "input")
+               (cl-dataflow-kit:make-edge
+                "source" "right" :from-port "value" :to-port "input")
+               (cl-dataflow-kit:make-edge
+                "left" "merge" :from-port "value" :to-port "left")
+               (cl-dataflow-kit:make-edge
+                "right" "merge" :from-port "value" :to-port "right")))))
+      (expect (run-cps-pipeline pipeline 0 :parallel t) :to-be 3))))
 
 (describe "authorization policy"
   (it "allows an in-scope lab host under the default lab-only policy"
