@@ -53,9 +53,17 @@
 
 (asdf:defsystem "nrecon/attack"
   :depends-on
-  ("nrecon/core" "nrecon/net")
+  ("nrecon/core" "nrecon/net" "cl-boundary-kit" "cl-pcap-kit"
+   "cl-json-kit")
+  :serial t
   :pathname "src/attack/"
-  :components ())
+  :components
+  ((:file "package")
+   (:file "frames")
+   (:file "gate")
+   (:file "module"))
+  :in-order-to
+  ((asdf:test-op (asdf:test-op "nrecon/attack-test"))))
 
 (asdf:defsystem "nrecon/wire"
   :depends-on ("nrecon/core" "cl-json-kit" "cl-boundary-kit"
@@ -117,6 +125,14 @@
   :perform (asdf:test-op (operation system)
     (declare (ignore operation system))
     (uiop:symbol-call :nrecon/net-test :run-tests)))
+(asdf:defsystem "nrecon/attack-test"
+  :depends-on ("nrecon/attack" "cl-weave")
+  :serial t
+  :pathname "src/attack/"
+  :components ((:file "attack-tests"))
+  :perform (asdf:test-op (operation system)
+    (declare (ignore operation system))
+    (uiop:symbol-call :nrecon/attack-test :run-tests)))
 (asdf:defsystem "nrecon/fuzz-test"
   :depends-on ("nrecon/fuzz" "cl-weave")
   :serial t
