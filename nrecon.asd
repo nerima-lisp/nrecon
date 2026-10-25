@@ -52,9 +52,7 @@
   ((asdf:test-op (asdf:test-op "nrecon/net-test"))))
 
 (asdf:defsystem "nrecon/attack"
-  :depends-on
-  ("nrecon/core" "nrecon/net" "cl-boundary-kit" "cl-pcap-kit"
-   "cl-json-kit")
+  :depends-on ("nrecon/core" "nrecon/net" "cl-boundary-kit" "cl-pcap-kit")
   :serial t
   :pathname "src/attack/"
   :components

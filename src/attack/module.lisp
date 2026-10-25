@@ -17,24 +17,43 @@
 (defun %context-option (context key)
   (%option context key))
 
-(defun %json-bool (value)
-  (if value t cl-json-kit:+json-false+))
+(defun %json-string (string)
+  (with-output-to-string (stream)
+    (write-char #\" stream)
+    (loop for character across string
+          for code = (char-code character)
+          do (case code
+               (8 (write-string "\\b" stream))
+               (9 (write-string "\\t" stream))
+               (10 (write-string "\\n" stream))
+               (12 (write-string "\\f" stream))
+               (13 (write-string "\\r" stream))
+               (34 (write-string "\\\"" stream))
+               (92 (write-string "\\\\" stream))
+               (otherwise
+                (if (< code 32)
+                    (format stream "\\u~4,'0X" code)
+                    (write-char character stream)))))
+    (write-char #\" stream)))
 
 (defun render-attack-plan (action target policy packet-length)
   "Return a JSON dry-run plan. This function never opens or sends a packet."
   (check-type packet-length (integer 0 *))
   (let* ((decision (%decision policy action target))
-         (object (make-hash-table :test #'equal)))
-    (setf (gethash "action" object) (%action-name action)
-          (gethash "authorized" object)
-          (%json-bool (authorization-decision-allowed-p decision))
-          (gethash "dry_run" object) t
-          (gethash "packet_length" object) packet-length
-          (gethash "reason" object)
-          (string-downcase (symbol-name (authorization-decision-reason decision)))
-          (gethash "target" object)
-          (nrecon.core:authorization-target-host target))
-    (cl-json-kit:stringify object :sort-keys t)))
+         (host (nrecon.core:authorization-target-host target))
+         (authorized (if (authorization-decision-allowed-p decision)
+                         "true" "false"))
+         (reason
+           (%json-string
+            (string-downcase
+             (symbol-name (authorization-decision-reason decision))))))
+    (format nil
+            "{\"action\":~A,\"authorized\":~A,\"dry_run\":true,\"packet_length\":~D,\"reason\":~A,\"target\":~A}"
+            (%json-string (%action-name action))
+            authorized
+            packet-length
+            reason
+            (if (stringp host) (%json-string host) "null"))))
 
 (defun %packet-for-options (action options)
   (case action

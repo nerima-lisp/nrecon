@@ -212,7 +212,15 @@
       (expect (not (null (search "\"dry_run\":true" plan))) :to-be t)
       (expect (not (null (search "\"authorized\":true" plan))) :to-be t)
       (expect sent :to-be nil)
-      (expect (nrecon.core:module-name module) :to-equal "attack"))))
+      (expect (nrecon.core:module-name module) :to-equal "attack")))
+  (it "escapes JSON strings in dry-run plans"
+    (let ((plan
+            (render-attack-plan
+             :arp-spoof
+             (nrecon.core:make-authorization-target
+              :host "host.\"quoted" :lab-p t)
+             nil 42)))
+      (expect (not (null (search "host.\\\"quoted" plan))) :to-be t))))
 
 (defun run-tests ()
   (let* ((plan (cl-weave:list-tests :reporter :sexp
