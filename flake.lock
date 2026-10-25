@@ -1324,11 +1324,11 @@
         "treefmt-nix": "treefmt-nix_44"
       },
       "locked": {
-        "lastModified": 1792918986,
-        "narHash": "sha256-eXkFR2j+fGMGnZNTaifNJm1/V9a/PUPRNtoYrXY5ZJE=",
+        "lastModified": 1792926728,
+        "narHash": "sha256-cf8PUEAiLueSOPDkiep0RjQQOSFMB3nkUOQh8sRWIoU=",
         "owner": "nerima-lisp",
         "repo": "cl-pcap-kit",
-        "rev": "d2a25cafd4bb68c1ef9cd95baee083606fe1e009",
+        "rev": "40317c47538a543da124c4138ee5a5fc8f6faca3",
         "type": "github"
       },
       "original": {

@@ -24,6 +24,10 @@
       (progn (funcall thunk) :sent)
     (attack-authorization-denied () :denied)
     (attack-audit-failure () :denied)))
+(defun %error-result (thunk)
+  (handler-case
+      (progn (funcall thunk) :accepted)
+    (error () :rejected)))
 
 (describe "nrecon attack frame generation"
   (it "builds an ARP reply with the requested Ethernet and ARP addresses"
@@ -84,7 +88,7 @@
               :to-equal "02:00:00:00:00:33"))))
 
 (describe "nrecon attack authorization and audit gate"
-  (it "audits and rejects an action without a policy before invoking the sender"
+  (it "records a denied decision before returning and never invokes the sender"
     (let ((events nil)
           (packet (%test-packet)))
       (expect
@@ -94,7 +98,7 @@
            nil :arp-spoof (%test-target "192.0.2.10")
            (lambda (record)
              (push (list :audit record) events)
-             t)
+             :persisted)
            packet
            (lambda (bytes timeout)
              (declare (ignore bytes timeout))
@@ -102,8 +106,9 @@
        :to-be :denied)
       (expect (mapcar (lambda (event) (if (consp event) :audit event))
                       (nreverse events))
-              :to-equal '(:audit))
-      (expect (find :packet-bytes (second (first events))) :to-be nil)))
+              :to-equal (list :audit))
+      (expect (getf (second (first events)) :authorized) :to-be nil)
+      (expect (getf (second (first events)) :packet-bytes) :to-be nil)))
   (it "rejects a target outside the allowlist before invoking the sender"
     (let ((sent nil)
           (audited nil))
@@ -113,7 +118,10 @@
           (authorize-and-send
            (%test-policy :arp-spoof "192.0.2.0/24")
            :arp-spoof (%test-target "198.51.100.10")
-           (lambda (record) (declare (ignore record)) (setf audited t))
+           (lambda (record)
+             (declare (ignore record))
+             (setf audited t)
+             :persisted)
            (%test-packet)
            (lambda (bytes timeout)
              (declare (ignore bytes timeout))
@@ -121,22 +129,28 @@
        :to-be :denied)
       (expect audited :to-be t)
       (expect sent :to-be nil)))
-  (it "does not send when the audit callback fails"
-    (let ((sent nil))
-      (expect
-       (%deny-result
-        (lambda ()
-          (authorize-and-send
-           (%test-policy :arp-spoof "192.0.2.10")
-           :arp-spoof (%test-target "192.0.2.10")
-           (lambda (record) (declare (ignore record)) nil)
-           (%test-packet)
-           (lambda (bytes timeout)
-             (declare (ignore bytes timeout))
-             (setf sent t)))))
-       :to-be :denied)
+  (it "requires an explicit durable audit acknowledgment before sending"
+    (let ((sent nil)
+          (audit-count 0))
+      (dolist (acknowledgment (list :failed t))
+        (expect
+         (%deny-result
+          (lambda ()
+            (authorize-and-send
+             (%test-policy :arp-spoof "192.0.2.10")
+             :arp-spoof (%test-target "192.0.2.10")
+             (lambda (record)
+               (declare (ignore record))
+               (incf audit-count)
+               acknowledgment)
+             (%test-packet)
+             (lambda (bytes timeout)
+               (declare (ignore bytes timeout))
+               (setf sent t)))))
+         :to-be :denied))
+      (expect audit-count :to-be 2)
       (expect sent :to-be nil)))
-  (it "calls the audit callback immediately before an authorized send"
+  (it "audits an allowed decision before invoking the sender"
     (let ((events nil)
           (packet (%test-packet)))
       (expect
@@ -145,26 +159,204 @@
         :arp-spoof (%test-target "192.0.2.10")
         (lambda (record)
           (expect (getf record :action) :to-equal "arp-spoof")
+          (expect (getf record :authorized) :to-be t)
           (expect (getf record :packet-length) :to-be 3)
           (push :audit events)
-          t)
+          :persisted)
         packet
         (lambda (bytes timeout)
           (declare (ignore timeout))
           (push :send events)
           (length bytes)))
        :to-be 3)
-      (expect (nreverse events) :to-equal '(:audit :send))))
-  (it "relays one captured frame through the same per-send gate"
+      (expect (nreverse events) :to-equal (list :audit :send))))
+  (it "removes controls and bounds user values before passing audit metadata"
+    (let* ((control-prefix
+             (coerce (list #\a #\Newline #\b #\Tab #\c #\Return #\d
+                           (code-char 27))
+                     'string))
+           (host (concatenate 'string control-prefix
+                              (make-string 300 :initial-element #\x)))
+           (expected-host (concatenate 'string "abcd"
+                                       (make-string 252 :initial-element #\x)))
+           (action (concatenate 'string "arp" (string (code-char 10)) "-spoof"))
+           (target (%test-target host))
+           (policy (%test-policy action host))
+           (record nil)
+           (sent nil))
+      (expect
+       (%deny-result
+        (lambda ()
+          (authorize-and-send
+           policy action target
+           (lambda (audit-record)
+             (setf record audit-record)
+             :persisted)
+           (%test-packet)
+           (lambda (bytes timeout)
+             (declare (ignore bytes timeout))
+             (setf sent t)))))
+       :to-be :denied)
+      (expect (getf record :action) :to-equal "arp-spoof")
+      (expect (getf record :target) :to-equal expected-host)
+      (expect (length (getf record :target)) :to-be 256)
+      (expect (<= (length (getf record :reason)) 64) :to-be t)
+      (expect sent :to-be nil)))
+  (it "rejects a relay target that differs from the rewritten frame destination"
     (let* ((frame
-             (build-arp-reply
+             (build-dns-response-frame
               :source-mac "02:00:00:00:00:11"
-              :source-ip "192.0.2.1"
+              :source-ip "192.0.2.53"
               :target-mac "02:00:00:00:00:22"
-              :target-ip "192.0.2.10"))
+              :target-ip "192.0.2.10"
+              :query-name "resolver.example.test"
+              :answer-ip "198.51.100.7"))
+           (audited nil)
+           (sent nil))
+      (expect
+       (%error-result
+        (lambda ()
+          (run-mitm-relay
+           frame
+           :source-mac "02:00:00:00:00:11"
+           :destination-mac "02:00:00:00:00:22"
+           :interface-mac "02:00:00:00:00:99"
+           :target-host "198.51.100.10"
+           :authorization-policy (%test-policy :mitm-proxy "198.51.100.10")
+           :audit-fn (lambda (record)
+                       (declare (ignore record))
+                       (setf audited t)
+                       :persisted)
+           :sender (lambda (bytes timeout)
+                     (declare (ignore bytes timeout))
+                     (setf sent t)))))
+       :to-be :rejected)
+      (expect audited :to-be nil)
+      (expect sent :to-be nil)))
+  (it "rejects unsupported and malformed relay frames before audit or send"
+    (let* ((frame
+             (build-dns-response-frame
+              :source-mac "02:00:00:00:00:11"
+              :source-ip "192.0.2.53"
+              :target-mac "02:00:00:00:00:22"
+              :target-ip "192.0.2.10"
+              :query-name "resolver.example.test"
+              :answer-ip "198.51.100.7"))
+           (unsupported (copy-seq frame))
+           (truncated (subseq frame 0 20))
+           (fragmented (copy-seq frame))
+           (unsupported-transport (copy-seq frame))
+           (audited 0)
+           (sent 0))
+      (setf (aref unsupported 12) #x86
+            (aref unsupported 13) #xdd
+            (aref fragmented 20) #x20
+            (aref fragmented 21) #x00
+            (aref unsupported-transport 23) 1)
+      (dolist (bad-frame (list unsupported truncated fragmented
+                                unsupported-transport))
+        (expect
+         (%error-result
+          (lambda ()
+            (run-mitm-relay
+             bad-frame
+             :source-mac "02:00:00:00:00:11"
+             :destination-mac "02:00:00:00:00:22"
+             :interface-mac "02:00:00:00:00:99"
+             :target-host "192.0.2.10"
+             :authorization-policy (%test-policy :mitm-proxy "192.0.2.10")
+             :audit-fn (lambda (record)
+                         (declare (ignore record))
+                         (incf audited)
+                         :persisted)
+             :sender (lambda (bytes timeout)
+                       (declare (ignore bytes timeout))
+                       (incf sent)))))
+         :to-be :rejected))
+      (expect audited :to-be 0)
+      (expect sent :to-be 0)))
+  (it "uses configured IPv4 exact entries and CIDRs as lab-scope proof"
+    (let ((destination (nrecon.attack::%ipv4-literal-octets "192.0.2.10")))
+      (expect (nrecon.attack::%trusted-lab-destination-p
+               (%test-policy :arp-spoof "192.0.2.10") destination)
+              :to-be t)
+      (expect (nrecon.attack::%trusted-lab-destination-p
+               (%test-policy :arp-spoof "192.0.2.0/24") destination)
+              :to-be t)
+      (expect (nrecon.attack::%trusted-lab-destination-p
+               (%test-policy :arp-spoof "192.0.3.0/24") destination)
+              :to-be nil)
+      (expect (nrecon.attack::%trusted-lab-destination-p
+               (%test-policy :arp-spoof "resolver.example.test") destination)
+              :to-be nil)))
+  (it "ignores a spoofed context lab flag for an out-of-scope target"
+    (let ((record nil)
+          (sent nil))
+      (expect
+       (%deny-result
+        (lambda ()
+          (run-attack
+           (list :action :arp-spoof
+                 :source-mac "02:00:00:00:00:11"
+                 :spoofed-ip "192.0.2.1"
+                 :target-mac "02:00:00:00:00:22"
+                 :target-ip "198.51.100.10")
+           (list :authorization-policy
+                 (%test-policy :arp-spoof "192.0.2.0/24")
+                 :target-lab-p t
+                 :audit-fn (lambda (audit-record)
+                             (setf record audit-record)
+                             :persisted)
+                 :sender (lambda (bytes timeout)
+                           (declare (ignore bytes timeout))
+                           (setf sent t))))))
+       :to-be :denied)
+      (expect (getf record :authorized) :to-be nil)
+      (expect sent :to-be nil)))
+  (it "ignores a spoofed MITM lab flag for the actual frame destination"
+  (let* ((frame
+           (build-dns-response-frame
+            :source-mac "02:00:00:00:00:11"
+            :source-ip "192.0.2.53"
+            :target-mac "02:00:00:00:00:22"
+            :target-ip "198.51.100.10"
+            :query-name "resolver.example.test"
+            :answer-ip "198.51.100.7"))
+         (record nil)
+         (sent nil))
+    (expect
+     (%deny-result
+      (lambda ()
+        (run-mitm-relay
+         frame
+         :source-mac "02:00:00:00:00:11"
+         :destination-mac "02:00:00:00:00:22"
+         :interface-mac "02:00:00:00:00:99"
+         :target-host "198.51.100.10"
+         :target-lab-p t
+         :authorization-policy (%test-policy :mitm-proxy "192.0.2.0/24")
+         :audit-fn (lambda (audit-record)
+                     (setf record audit-record)
+                     :persisted)
+         :sender (lambda (bytes timeout)
+                   (declare (ignore bytes timeout))
+                   (setf sent t)))))
+     :to-be :denied)
+    (expect (getf record :authorized) :to-be nil)
+    (expect sent :to-be nil)))
+  (it "relays an allowed IPv4 UDP frame through only the injected sender"
+    (let* ((frame
+             (build-dns-response-frame
+              :source-mac "02:00:00:00:00:11"
+              :source-ip "192.0.2.53"
+              :target-mac "02:00:00:00:00:22"
+              :target-ip "192.0.2.10"
+              :query-name "resolver.example.test"
+              :answer-ip "198.51.100.7"))
            (events nil)
            (sent nil)
            (relay-mac "02:00:00:00:00:99")
+           (record nil)
            (result
              (run-mitm-relay
               frame
@@ -172,26 +364,28 @@
               :destination-mac "02:00:00:00:00:22"
               :interface-mac relay-mac
               :target-host "192.0.2.10"
-              :target-lab-p t
-              :authorization-policy (%test-policy :mitm-proxy "192.0.2.10")
-              :audit-fn (lambda (record)
+              :target-lab-p nil
+              :authorization-policy (%test-policy :mitm-proxy "192.0.2.0/24")
+              :audit-fn (lambda (audit-record)
+                          (setf record audit-record)
                           (push :audit events)
-                          (expect (getf record :action) :to-equal "mitm-proxy")
-                          t)
+                          :persisted)
               :sender (lambda (bytes timeout)
                         (declare (ignore timeout))
                         (push (copy-seq bytes) sent)
                         (push :send events)
                         (length bytes))))
            (relayed (first sent)))
-      (expect result :to-be 42)
+      (expect result :to-be (length frame))
       (expect (length sent) :to-be 1)
+      (expect (getf record :target) :to-equal "192.0.2.10")
+      (expect (getf record :authorized) :to-be t)
       (expect (equalp (subseq relayed 0 6) (subseq frame 0 6)) :to-be t)
       (expect (equalp (subseq relayed 6 12)
                       (nrecon.attack::%mac-octets relay-mac))
               :to-be t)
       (expect (equalp (subseq relayed 12) (subseq frame 12)) :to-be t)
-      (expect (nreverse events) :to-equal '(:audit :send))))
+      (expect (nreverse events) :to-equal (list :audit :send))))
   (it "renders an authorized dry-run JSON plan without invoking its sender"
     (let* ((sent nil)
            (policy (%test-policy :arp-spoof "192.0.2.10"))
@@ -204,7 +398,7 @@
                 :target-ip "192.0.2.10"
                 :dry-run t)
               (list :authorization-policy policy
-                    :target-lab-p t
+                    :target-lab-p nil
                     :sender (lambda (bytes timeout)
                               (declare (ignore bytes timeout))
                               (setf sent t)))))

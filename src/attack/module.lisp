@@ -81,8 +81,11 @@
                                     target-host (target-lab-p nil)
                                     authorization-policy audit-fn sender interface
                                     (timeout 1.0) deadline dry-run)
-  "Relay one already-captured Ethernet frame after rewriting its L2 addresses.
-The capture loop is supplied by the caller; every relay send uses the gate."
+  "Relay supported untagged Ethernet II, unfragmented IPv4 TCP/UDP frames.
+DNS payloads are opaque; authorization uses the outer IPv4 destination.
+Reject ARP, IPv6, VLAN, IPv4 options/fragments, and malformed or unsupported
+transport headers. TARGET-HOST, when supplied, must match that destination."
+  (declare (ignore target-lab-p))
   (let* ((bytes (%check-octets frame))
          (expected-source (%mac-octets source-mac))
          (expected-destination (%mac-octets destination-mac)))
@@ -90,15 +93,25 @@ The capture loop is supplied by the caller; every relay send uses the gate."
                  (equalp (subseq bytes 0 6) expected-destination)
                  (equalp (subseq bytes 6 12) expected-source))
       (error "Captured frame MACs do not match the requested relay endpoints."))
-    (let* ((packet (rewrite-l2-frame bytes interface-mac destination-mac))
-           (target (make-authorization-target :host target-host
-                                              :lab-p target-lab-p)))
-      (if dry-run
-          (render-attack-plan :mitm-proxy target authorization-policy
-                              (length packet))
-          (%send-packet packet :mitm-proxy target authorization-policy audit-fn
-                        :sender sender :interface interface
-                        :timeout timeout :deadline deadline)))))
+    (let ((packet (rewrite-l2-frame bytes interface-mac destination-mac)))
+      (multiple-value-bind (actual-host actual-octets)
+          (%frame-destination-address packet)
+        (when target-host
+          (let ((requested-octets (%ipv4-literal-octets target-host)))
+            (unless (and requested-octets
+                         (equalp requested-octets actual-octets))
+              (error "The supplied target host does not match the frame IPv4 destination."))))
+        (let ((target
+                (make-authorization-target
+                 :host actual-host
+                 :lab-p (%trusted-lab-destination-p authorization-policy
+                                                    actual-octets))))
+          (if dry-run
+              (render-attack-plan :mitm-proxy target authorization-policy
+                                  (length packet))
+              (%send-packet packet :mitm-proxy target authorization-policy audit-fn
+                            :sender sender :interface interface
+                            :timeout timeout :deadline deadline)))))))
 
 (defun run-attack (input context)
   (let* ((options (%job-options input))
@@ -106,11 +119,8 @@ The capture loop is supplied by the caller; every relay send uses the gate."
          (target-host (or (%option options :target-ip)
                           (and (typep input 'job)
                                (nrecon.core:job-target input))))
-         (target-lab-p (%context-option context :target-lab-p))
          (policy (%context-option context :authorization-policy))
-         (timeout (or (%option options :timeout) 1.0))
-         (target (make-authorization-target :host target-host
-                                            :lab-p target-lab-p)))
+         (timeout (or (%option options :timeout) 1.0)))
     (if (eq action :mitm-proxy)
         (run-mitm-relay
          (%option options :frame)
@@ -118,14 +128,17 @@ The capture loop is supplied by the caller; every relay send uses the gate."
          :destination-mac (%option options :destination-mac)
          :interface-mac (%option options :interface-mac)
          :target-host target-host
-         :target-lab-p target-lab-p
          :authorization-policy policy
          :audit-fn (%context-option context :audit-fn)
          :sender (%context-option context :sender)
          :interface (%option options :interface)
          :timeout timeout
          :dry-run (%option options :dry-run))
-        (let ((packet (%packet-for-options action options)))
+        (let* ((target-octets (%ipv4-literal-octets target-host))
+               (target-lab-p (%trusted-lab-destination-p policy target-octets))
+               (target (make-authorization-target :host target-host
+                                                  :lab-p target-lab-p))
+               (packet (%packet-for-options action options)))
           (if (%option options :dry-run)
               (render-attack-plan action target policy (length packet))
               (%send-packet packet action target policy

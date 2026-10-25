@@ -23,6 +23,59 @@
 (defun %decision (policy action target)
   (check-type target authorization-target)
   (authorize-action (%effective-policy policy) action target))
+(defun %audit-safe-string (value limit)
+  (check-type limit (integer 1 *))
+  (let ((text (typecase value
+                (string value)
+                (symbol (symbol-name value))
+                (t "<non-string>"))))
+    (with-output-to-string (stream)
+      (let ((written 0))
+        (loop for index below (min (length text) (min (* limit 4) 4096))
+              while (< written limit)
+              for character = (char text index)
+              for code = (char-code character)
+              unless (or (<= code 31)
+                         (<= 127 code 159)
+                         (= code #x2028)
+                         (= code #x2029))
+                do (write-char character stream)
+                   (incf written))))))
+(defun %ipv4-allowlist-entry-matches-p (entry address-octets)
+  (when (and (stringp entry)
+             (typep address-octets '(vector (unsigned-byte 8)))
+             (= (length address-octets) 4))
+    (let ((slash (position #\/ entry)))
+      (if slash
+          (let* ((prefix-text (subseq entry (1+ slash)))
+                 (valid-prefix-text
+                   (and (<= 1 (length prefix-text) 2)
+                        (every (lambda (character)
+                                 (char<= #\0 character #\9))
+                               prefix-text)
+                        (or (= (length prefix-text) 1)
+                            (char/= (char prefix-text 0) #\0))))
+                 (prefix (and valid-prefix-text
+                              (parse-integer prefix-text)))
+                 (network (%ipv4-literal-octets
+                           (subseq entry 0 slash))))
+            (and network prefix
+                 (<= 0 prefix 32)
+                 (loop for index below 4
+                       for bits = (- prefix (* index 8))
+                       for mask = (cond ((>= bits 8) #xff)
+                                        ((<= bits 0) 0)
+                                        (t (logand #xff (ash #xff (- 8 bits)))))
+                       always (= (logand (aref network index) mask)
+                                 (logand (aref address-octets index) mask)))))
+          (let ((literal (%ipv4-literal-octets entry)))
+            (and literal (equalp literal address-octets)))))))
+(defun %trusted-lab-destination-p (policy address-octets)
+  "The configured IPv4 exact entries and CIDRs prove lab scope; caller flags do not."
+  (some (lambda (entry)
+          (%ipv4-allowlist-entry-matches-p entry address-octets))
+        (nrecon.core:authorization-policy-allowlist
+         (%effective-policy policy))))
 
 (defun %deadline (timeout)
   (check-type timeout (real 0 *))
@@ -39,10 +92,12 @@
 
 (defun %audit-record (action target decision packet)
   (list :event :outbound-packet-attempt
-        :action (%action-name action)
-        :target (nrecon.core:authorization-target-host target)
+        :action (%audit-safe-string (%action-name action) 64)
+        :target (%audit-safe-string
+                 (nrecon.core:authorization-target-host target) 256)
         :authorized (authorization-decision-allowed-p decision)
-        :reason (authorization-decision-reason decision)
+        :reason (%audit-safe-string
+                 (authorization-decision-reason decision) 64)
         :packet-length (length packet)))
 
 (defun %send-at-boundary (sender packet timeout)
@@ -58,22 +113,15 @@
 
 (defun authorize-and-send (policy action target audit-fn packet sender
                            &key (timeout 1.0) deadline)
-  "Authorize, audit, then inject one packet through the network boundary.
-AUDIT-FN receives metadata only and must return non-NIL on success. SENDER
-accepts an octet vector and a timeout in seconds."
+  "Authorize, persist the decision, then inject one packet through the network boundary.
+AUDIT-FN receives sanitized metadata and must return :PERSISTED only after
+durable persistence. SENDER accepts packet bytes and a timeout in seconds."
   (%check-octets packet)
-  (check-type audit-fn function)
   (check-type sender function)
-  (let* ((effective-deadline (or deadline (%deadline timeout)))
-         (decision (%decision policy action target))
-         (record (%audit-record action target decision packet)))
-  (unless (funcall audit-fn record)
-      (error 'attack-audit-failure))
-    (unless (authorization-decision-allowed-p decision)
-      (error 'attack-authorization-denied
-             :action action
-             :reason (authorization-decision-reason decision)))
-    (%send-at-boundary sender packet (%remaining-timeout effective-deadline))))
+  (let ((effective-deadline (or deadline (%deadline timeout))))
+    (%authorize-and-audit policy action target audit-fn packet)
+    (%send-at-boundary sender packet
+                       (%remaining-timeout effective-deadline))))
 
 (defun %pcap-open-at-boundary (interface timeout)
   (let ((boundary
@@ -100,8 +148,14 @@ accepts an octet vector and a timeout in seconds."
     (cl-boundary-kit:network-boundary-request
      boundary (list :injector injector) :timeout timeout)))
 
-(defun %preflight-authorization (policy action target)
-  (let ((decision (%decision policy action target)))
+(defun %authorize-and-audit (policy action target audit-fn packet)
+  (%check-octets packet)
+  (let* ((decision (%decision policy action target))
+         (record (%audit-record action target decision packet)))
+    (check-type audit-fn function)
+    (unless (handler-case (eq (funcall audit-fn record) :persisted)
+              (error () nil))
+      (error 'attack-audit-failure))
     (unless (authorization-decision-allowed-p decision)
       (error 'attack-authorization-denied
              :action action
@@ -118,13 +172,16 @@ accepts an octet vector and a timeout in seconds."
       (progn
         (unless interface
           (error "An interface or an injected sender is required for active packet injection."))
-        (%preflight-authorization policy action target)
-        (let ((injector (%pcap-open-at-boundary interface timeout)))
-          (unwind-protect
-               (authorize-and-send
-                policy action target audit-fn packet
-                (lambda (bytes send-timeout)
-                  (cl-pcap-kit:injector-send injector bytes
-                                             :timeout send-timeout))
-                :timeout timeout :deadline deadline)
-            (%pcap-close-at-boundary injector timeout))))))
+        (let ((effective-deadline (or deadline (%deadline timeout))))
+          (%authorize-and-audit policy action target audit-fn packet)
+          (let ((injector
+                  (%pcap-open-at-boundary
+                   interface (%remaining-timeout effective-deadline))))
+            (unwind-protect
+                 (%send-at-boundary
+                  (lambda (bytes send-timeout)
+                    (cl-pcap-kit:injector-send injector bytes
+                                               :timeout send-timeout))
+                  packet
+                  (%remaining-timeout effective-deadline))
+              (%pcap-close-at-boundary injector timeout)))))))
