@@ -38,9 +38,18 @@
 
 (asdf:defsystem "nrecon/net"
   :depends-on
-  ("nrecon/core" "cl-pcap-kit")
+  ("nrecon/core" "cl-boundary-kit" "cl-pcap-kit" "cl-cffi-kit" "cffi")
+  :serial t
   :pathname "src/net/"
-  :components ())
+  :components
+  ((:file "package")
+   (:file "records")
+   (:file "dissector")
+   (:file "protocols")
+   (:file "discovery")
+   (:file "capture"))
+  :in-order-to
+  ((asdf:test-op (asdf:test-op "nrecon/net-test"))))
 
 (asdf:defsystem "nrecon/attack"
   :depends-on
@@ -100,6 +109,14 @@
   :perform (asdf:test-op (operation system)
     (declare (ignore operation system))
     (uiop:symbol-call :nrecon/wire-test :run-tests)))
+(asdf:defsystem "nrecon/net-test"
+  :depends-on ("nrecon/net" "cl-weave")
+  :serial t
+  :pathname "src/net/"
+  :components ((:file "net-tests"))
+  :perform (asdf:test-op (operation system)
+    (declare (ignore operation system))
+    (uiop:symbol-call :nrecon/net-test :run-tests)))
 (asdf:defsystem "nrecon/fuzz-test"
   :depends-on ("nrecon/fuzz" "cl-weave")
   :serial t

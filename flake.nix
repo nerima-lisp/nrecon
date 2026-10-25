@@ -74,6 +74,17 @@
       url = "github:nerima-lisp/cl-resilience-kit/v1.0.0";
       flake = false;
     };
+
+    cl-cffi-kit = {
+      url = "github:nerima-lisp/cl-cffi-kit";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    cl-pcap-kit = {
+      url = "github:nerima-lisp/cl-pcap-kit";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.cl-cffi-kit.follows = "cl-cffi-kit";
+    };
   };
 
   outputs =
@@ -94,6 +105,8 @@
       cl-json-kit,
       cl-regex-kit,
       cl-resilience-kit,
+      cl-cffi-kit,
+      cl-pcap-kit,
     }:
     let
       systems = [
@@ -107,6 +120,7 @@
       pname = "nrecon";
       asd = ./nrecon.asd;
       root = ./.;
+      sourceInclude = [ ./src/net/fixtures/discovery.pcap ];
       lispSystem = "nrecon/wire";
 
       lispDependencies =
@@ -136,7 +150,10 @@
             lispSystem = "cl-http-kit/client";
             version = forge.fromAsdSystem "${cl-http-kit}/cl-http-kit.asd";
             src = cl-http-kit;
-            lispDependencies = [ codecKit deflateKit ];
+            lispDependencies = [
+              codecKit
+              deflateKit
+            ];
           };
           regexKit = forge.lispDerivation {
             pname = "cl-regex-kit";
@@ -174,6 +191,8 @@
           cl-date-kit.packages.${ctx.system}.cl-date-kit
           cl-boundary-kit.packages.${ctx.system}.cl-boundary-kit
           cl-log-kit.packages.${ctx.system}.cl-log-kit
+          cl-cffi-kit.packages.${ctx.system}.cl-cffi-kit
+          cl-pcap-kit.packages.${ctx.system}.cl-pcap-kit
           codecKit
           httpClient
           regexKit
@@ -184,6 +203,10 @@
       lispCheckDependencies = ctx: [
         cl-weave.packages.${ctx.system}.cl-weave
       ];
+
+      packageArgs = ctx: {
+        nativeLibraries = [ ctx.pkgs.libpcap ];
+      };
 
       meta = {
         description = "Core of nrecon, an authorized security testing toolkit";
