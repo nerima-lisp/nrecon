@@ -9,7 +9,9 @@
       (progn
         (asdf:test-system "nrecon/core")
         (uiop:symbol-call :cl-weave :clear-tests)
-        (asdf:test-system "nrecon/wire"))
+        (asdf:test-system "nrecon/wire")
+        (uiop:symbol-call :cl-weave :clear-tests)
+        (asdf:test-system "nrecon/fuzz"))
     (error (condition)
       (format *error-output* "~&nrecon tests failed: ~A~%" condition)
       (finish-output *error-output*)

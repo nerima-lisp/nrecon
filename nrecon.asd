@@ -20,10 +20,21 @@
   ((asdf:test-op (asdf:test-op "nrecon/core-test"))))
 
 (asdf:defsystem "nrecon/fuzz"
-  :depends-on
-  ("nrecon/core" "cl-http-kit" "cl-regex-kit" "cl-resilience-kit")
+  :depends-on ("nrecon/core" "cl-concurrent-kit" "cl-boundary-kit"
+               "cl-http-kit/client" "cl-regex-kit" "cl-resilience-kit"
+               "cl-codec-kit")
+  :serial t
   :pathname "src/fuzz/"
-  :components ())
+  :components
+  ((:file "package")
+   (:file "records")
+   (:file "wordlist")
+   (:file "template")
+   (:file "matcher")
+   (:file "transport")
+   (:file "engine"))
+  :in-order-to
+  ((asdf:test-op (asdf:test-op "nrecon/fuzz-test"))))
 
 (asdf:defsystem "nrecon/net"
   :depends-on
@@ -89,3 +100,11 @@
   :perform (asdf:test-op (operation system)
     (declare (ignore operation system))
     (uiop:symbol-call :nrecon/wire-test :run-tests)))
+(asdf:defsystem "nrecon/fuzz-test"
+  :depends-on ("nrecon/fuzz" "cl-weave")
+  :serial t
+  :pathname "tests/fuzz/"
+  :components ((:file "package") (:file "suite"))
+  :perform (asdf:test-op (operation system)
+    (declare (ignore operation system))
+    (uiop:symbol-call :nrecon/fuzz-test :run-tests)))

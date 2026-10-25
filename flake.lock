@@ -242,6 +242,23 @@
         "type": "github"
       }
     },
+    "cl-codec-kit_2": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1785920269,
+        "narHash": "sha256-gdpeurD7tMtJdk5X87I9v/cDWHvkplaWHAeVUMCkyFU=",
+        "owner": "nerima-lisp",
+        "repo": "cl-codec-kit",
+        "rev": "e30be513f5f8e936e968ff8d7910f43ef986ba6f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nerima-lisp",
+        "ref": "v0.5.0",
+        "repo": "cl-codec-kit",
+        "type": "github"
+      }
+    },
     "cl-concurrent-kit": {
       "inputs": {
         "cl-boundary-kit": "cl-boundary-kit_2",
@@ -305,7 +322,7 @@
     "cl-dataflow-kit": {
       "inputs": {
         "cl-boundary-kit": "cl-boundary-kit_4",
-        "cl-codec-kit": "cl-codec-kit",
+        "cl-codec-kit": "cl-codec-kit_2",
         "cl-concurrent-kit": "cl-concurrent-kit_2",
         "cl-date-kit": "cl-date-kit_3",
         "cl-host-kit": "cl-host-kit_8",
@@ -414,6 +431,23 @@
         "owner": "nerima-lisp",
         "ref": "v1.0.0",
         "repo": "cl-date-kit",
+        "type": "github"
+      }
+    },
+    "cl-deflate-kit": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792829654,
+        "narHash": "sha256-0tf3CC6we1c7bZl+Vv0dVrsXb71IHRwVTo6R+X+2foc=",
+        "owner": "nerima-lisp",
+        "repo": "cl-deflate-kit",
+        "rev": "5352176801df9808b070f779cacba780cf8bfbbe",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nerima-lisp",
+        "ref": "v0.4.0",
+        "repo": "cl-deflate-kit",
         "type": "github"
       }
     },
@@ -672,6 +706,23 @@
         "owner": "nerima-lisp",
         "ref": "v0.3.1",
         "repo": "cl-host-kit",
+        "type": "github"
+      }
+    },
+    "cl-http-kit": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791163049,
+        "narHash": "sha256-+dbiykdRWeqV2+gv04uUZvHTqiAujn6Qnugd2yRvado=",
+        "owner": "nerima-lisp",
+        "repo": "cl-http-kit",
+        "rev": "1cac539512cecdfa428c7f7b2150f8919fb5336a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nerima-lisp",
+        "ref": "v0.4.0",
+        "repo": "cl-http-kit",
         "type": "github"
       }
     },
@@ -1126,6 +1177,23 @@
         "type": "github"
       }
     },
+    "cl-parser-kit": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1785931427,
+        "narHash": "sha256-IR8GbJVuSKS8fTcuQezTVlJJ3nU802shk2fdiHszcig=",
+        "owner": "nerima-lisp",
+        "repo": "cl-parser-kit",
+        "rev": "6379014e6d85bdaecc57157611baa4ddf4b2b206",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nerima-lisp",
+        "ref": "v1.1.1",
+        "repo": "cl-parser-kit",
+        "type": "github"
+      }
+    },
     "cl-process-kit": {
       "flake": false,
       "locked": {
@@ -1357,6 +1425,40 @@
         "owner": "nerima-lisp",
         "ref": "v1.0.1",
         "repo": "cl-prolog",
+        "type": "github"
+      }
+    },
+    "cl-regex-kit": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1790521261,
+        "narHash": "sha256-4BAunpX2NMUgt5usfJWp1dRqc0H01Is3MrGMGkquKio=",
+        "owner": "nerima-lisp",
+        "repo": "cl-regex-kit",
+        "rev": "da83905cad2bcb28518ebb28cac6628c654bb328",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nerima-lisp",
+        "ref": "v2.2.0",
+        "repo": "cl-regex-kit",
+        "type": "github"
+      }
+    },
+    "cl-resilience-kit": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1786763915,
+        "narHash": "sha256-zKSL3mIsa783J8E2AD4tZUrQWaFuyMBjzLeE4wYYjVM=",
+        "owner": "nerima-lisp",
+        "repo": "cl-resilience-kit",
+        "rev": "741d42399ad781244bd36750c6626bd9f4e8b16b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nerima-lisp",
+        "ref": "v1.0.0",
+        "repo": "cl-resilience-kit",
         "type": "github"
       }
     },
@@ -2119,15 +2221,21 @@
     "root": {
       "inputs": {
         "cl-boundary-kit": "cl-boundary-kit",
+        "cl-codec-kit": "cl-codec-kit",
         "cl-concurrent-kit": "cl-concurrent-kit",
         "cl-dataflow-kit": "cl-dataflow-kit",
         "cl-date-kit": [
           "cl-concurrent-kit",
           "cl-date-kit"
         ],
+        "cl-deflate-kit": "cl-deflate-kit",
+        "cl-http-kit": "cl-http-kit",
         "cl-json-kit": "cl-json-kit_3",
         "cl-log-kit": "cl-log-kit_4",
         "cl-nix-forge": "cl-nix-forge_11",
+        "cl-parser-kit": "cl-parser-kit",
+        "cl-regex-kit": "cl-regex-kit",
+        "cl-resilience-kit": "cl-resilience-kit",
         "cl-weave": "cl-weave_12",
         "nixpkgs": "nixpkgs"
       }

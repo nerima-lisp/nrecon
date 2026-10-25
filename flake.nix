@@ -19,11 +19,31 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    cl-codec-kit = {
+      url = "github:nerima-lisp/cl-codec-kit/v0.5.0";
+      flake = false;
+    };
+
     cl-date-kit.follows = "cl-concurrent-kit/cl-date-kit";
 
     cl-boundary-kit = {
       url = "github:nerima-lisp/cl-boundary-kit/v2.3.0";
       inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    cl-deflate-kit = {
+      url = "github:nerima-lisp/cl-deflate-kit/v0.4.0";
+      flake = false;
+    };
+
+    cl-http-kit = {
+      url = "github:nerima-lisp/cl-http-kit/v0.4.0";
+      flake = false;
+    };
+
+    cl-parser-kit = {
+      url = "github:nerima-lisp/cl-parser-kit/v1.1.1";
+      flake = false;
     };
 
     cl-log-kit = {
@@ -44,6 +64,16 @@
       url = "github:nerima-lisp/cl-json-kit/v1.0.0";
       flake = false;
     };
+
+    cl-regex-kit = {
+      url = "github:nerima-lisp/cl-regex-kit/v2.2.0";
+      flake = false;
+    };
+
+    cl-resilience-kit = {
+      url = "github:nerima-lisp/cl-resilience-kit/v1.0.0";
+      flake = false;
+    };
   };
 
   outputs =
@@ -53,11 +83,17 @@
       cl-nix-forge,
       cl-dataflow-kit,
       cl-concurrent-kit,
+      cl-codec-kit,
       cl-date-kit,
       cl-boundary-kit,
+      cl-deflate-kit,
+      cl-http-kit,
+      cl-parser-kit,
       cl-log-kit,
       cl-weave,
       cl-json-kit,
+      cl-regex-kit,
+      cl-resilience-kit,
     }:
     let
       systems = [
@@ -73,13 +109,56 @@
       root = ./.;
       lispSystem = "nrecon/wire";
 
-      lispDependencies = ctx: [
-        cl-dataflow-kit.packages.${ctx.system}.default
-        cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
-        cl-date-kit.packages.${ctx.system}.cl-date-kit
-        cl-boundary-kit.packages.${ctx.system}.cl-boundary-kit
-        cl-log-kit.packages.${ctx.system}.cl-log-kit
-          (ctx.cl.fromNixpkgsLisp {
+      lispDependencies =
+        ctx:
+        let
+          forge = cl-nix-forge.lib.${ctx.system};
+          codecKit = forge.lispDerivation {
+            pname = "cl-codec-kit";
+            lispSystem = "cl-codec-kit";
+            version = forge.fromAsdSystem "${cl-codec-kit}/cl-codec-kit.asd";
+            src = cl-codec-kit;
+          };
+          deflateKit = forge.lispDerivation {
+            pname = "cl-deflate-kit";
+            lispSystem = "cl-deflate-kit";
+            version = forge.fromAsdSystem "${cl-deflate-kit}/cl-deflate-kit.asd";
+            src = cl-deflate-kit;
+          };
+          parserKit = forge.lispDerivation {
+            pname = "cl-parser-kit";
+            lispSystem = "cl-parser-kit";
+            version = forge.fromAsdSystem "${cl-parser-kit}/cl-parser-kit.asd";
+            src = cl-parser-kit;
+          };
+          httpClient = forge.lispDerivation {
+            pname = "cl-http-kit";
+            lispSystem = "cl-http-kit/client";
+            version = forge.fromAsdSystem "${cl-http-kit}/cl-http-kit.asd";
+            src = cl-http-kit;
+            lispDependencies = [ codecKit deflateKit ];
+          };
+          regexKit = forge.lispDerivation {
+            pname = "cl-regex-kit";
+            lispSystem = "cl-regex-kit";
+            version = forge.fromAsdSystem "${cl-regex-kit}/cl-regex-kit.asd";
+            src = cl-regex-kit;
+            lispDependencies = [
+              parserKit
+              cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
+            ];
+          };
+          resilienceKit = forge.lispDerivation {
+            pname = "cl-resilience-kit";
+            lispSystem = "cl-resilience-kit";
+            version = forge.fromAsdSystem "${cl-resilience-kit}/cl-resilience-kit.asd";
+            src = cl-resilience-kit;
+            lispDependencies = [
+              cl-boundary-kit.packages.${ctx.system}.cl-boundary-kit
+              cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
+            ];
+          };
+          jsonKit = ctx.cl.fromNixpkgsLisp {
             drv = ctx.pkgs.sbcl.buildASDFSystem {
               pname = "cl-json-kit";
               version = "1.0.0";
@@ -87,8 +166,20 @@
               systems = [ "cl-json-kit" ];
             };
             lispImplementation = "sbcl";
-          })
-      ];
+          };
+        in
+        [
+          cl-dataflow-kit.packages.${ctx.system}.default
+          cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
+          cl-date-kit.packages.${ctx.system}.cl-date-kit
+          cl-boundary-kit.packages.${ctx.system}.cl-boundary-kit
+          cl-log-kit.packages.${ctx.system}.cl-log-kit
+          codecKit
+          httpClient
+          regexKit
+          resilienceKit
+          jsonKit
+        ];
 
       lispCheckDependencies = ctx: [
         cl-weave.packages.${ctx.system}.cl-weave
