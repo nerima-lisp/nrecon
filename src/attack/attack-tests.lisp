@@ -75,7 +75,7 @@
            (rewritten
              (rewrite-l2-frame packet "02:00:00:00:00:99"
                                "02:00:00:00:00:33")))
-      (expect (subseq rewritten 12) :to-equal (subseq packet 12))
+      (expect (equalp (subseq rewritten 12) (subseq packet 12)) :to-be t)
       (expect (getf (getf (nrecon.net:decode-frame rewritten) :ethernet)
                     :source-mac)
               :to-equal "02:00:00:00:00:99")
@@ -186,10 +186,11 @@
            (relayed (first sent)))
       (expect result :to-be 42)
       (expect (length sent) :to-be 1)
-      (expect (subseq relayed 0 6) :to-equal (subseq frame 0 6))
-      (expect (subseq relayed 6 12)
-              :to-equal (nrecon.attack::%mac-octets relay-mac))
-      (expect (subseq relayed 12) :to-equal (subseq frame 12))
+      (expect (equalp (subseq relayed 0 6) (subseq frame 0 6)) :to-be t)
+      (expect (equalp (subseq relayed 6 12)
+                      (nrecon.attack::%mac-octets relay-mac))
+              :to-be t)
+      (expect (equalp (subseq relayed 12) (subseq frame 12)) :to-be t)
       (expect (nreverse events) :to-equal '(:audit :send))))
   (it "renders an authorized dry-run JSON plan without invoking its sender"
     (let* ((sent nil)
