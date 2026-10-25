@@ -223,19 +223,41 @@
     options))
 
 (defun %attack-audit (invocation record)
-  (cl-boundary-kit:console-write-error
-   (make-instance
-    '%mcp-console
-    :delegate
-    (cl-boundary-kit:make-console
-     :input *standard-input*
-     :output (invocation-stdout invocation)
-     :error (invocation-stderr invocation))
-    :input-stream *standard-input*
-    :output-stream (invocation-stdout invocation)
-    :error-stream (invocation-stderr invocation))
-   (format nil "nrecon attack audit: ~S" record))
-  t)
+  (let* ((path (option-value invocation :audit-file))
+         (filesystem (cl-boundary-kit:make-filesystem))
+         (console (make-instance
+                   (quote %mcp-console)
+                   :delegate
+                   (cl-boundary-kit:make-console
+                    :input *standard-input*
+                    :output (invocation-stdout invocation)
+                    :error (invocation-stderr invocation))
+                   :input-stream *standard-input*
+                   :output-stream (invocation-stdout invocation)
+                   :error-stream (invocation-stderr invocation))))
+    (unless path
+      (error "Active attacks require --audit-file for durable audit records."))
+    (unless (cl-boundary-kit:filesystem-append-file
+             filesystem
+             path
+             (concatenate
+              (quote string)
+              (json-kit:stringify
+               (%object
+                "action" (getf record :action)
+                "authorized" (%json-boolean (getf record :authorized))
+                "event" (string-downcase (symbol-name (getf record :event)))
+                "packet_length" (getf record :packet-length)
+                "reason" (getf record :reason)
+                "target" (getf record :target))
+               :sort-keys t)
+              (string #\Newline))
+             :external-format :utf-8)
+      (error "Attack audit append did not confirm persistence."))
+    (cl-boundary-kit:console-write-error
+     console
+     (format nil "nrecon attack audit: ~S" record))
+    :persisted))
 
 (defun %attack-command (invocation)
   (let* ((action-name (option-value invocation :action))
@@ -481,18 +503,21 @@
      :positionals (list (make-positional :key :target :required-p t
                                          :description "Target IP address or hostname."))
      :options (list (make-option :name "action" :kind :value :required-p t
-                                 :choices '("arp-spoof" "dns-spoof" "mitm-proxy"))
-                    (make-option :name "interface" :kind :value)
-                    (make-option :name "source-mac" :kind :value)
-                    (make-option :name "target-mac" :kind :value)
-                    (make-option :name "spoofed-ip" :kind :value)
-                    (make-option :name "query-name" :kind :value)
-                    (make-option :name "answer-ip" :kind :value)
-                    (make-option :name "destination-mac" :kind :value)
-                    (make-option :name "interface-mac" :kind :value)
-                    (make-option :name "frame" :kind :value)
-                    (make-option :name "timeout" :kind :value :type :integer
-                                 :default 1))
+                     :choices (list "arp-spoof" "dns-spoof" "mitm-proxy"))
+            (make-option :name "audit-file" :kind :value
+                         :value-hint :file
+                         :description "Append durable attack gate records to this JSON Lines file; required for active attempts.")
+            (make-option :name "interface" :kind :value)
+            (make-option :name "source-mac" :kind :value)
+            (make-option :name "target-mac" :kind :value)
+            (make-option :name "spoofed-ip" :kind :value)
+            (make-option :name "query-name" :kind :value)
+            (make-option :name "answer-ip" :kind :value)
+            (make-option :name "destination-mac" :kind :value)
+            (make-option :name "interface-mac" :kind :value)
+            (make-option :name "frame" :kind :value)
+            (make-option :name "timeout" :kind :value :type :integer
+                         :default 1))
      :handler (%safe-handler #'%attack-command))
     (make-command
      :name "session"

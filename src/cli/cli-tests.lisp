@@ -72,40 +72,58 @@
         (expect (%contains output "\"code\":-32700") :to-be t)
         (expect error-output :to-equal ""))))
   (it "denies an attack by default before the registered runner can send"
-    (multiple-value-bind (code output error-output)
-        (%invoke-cli '("--format" "json"
-                       "attack"
-                       "--action" "arp-spoof"
-                       "--source-mac" "02:00:00:00:00:11"
-                       "--target-mac" "02:00:00:00:00:22"
-                       "--spoofed-ip" "192.0.2.1"
-                       "192.0.2.10"))
-      (expect code :to-be 2)
-      (expect (%contains output "\"authorized\":false") :to-be t)
-      (expect (%contains error-output "nrecon attack audit") :to-be t))
-    (let* ((sent nil)
-           (job (make-job :id "cli-deny"
-                          :target "192.0.2.10"
-                          :options '(:action :arp-spoof
-                                     :source-mac "02:00:00:00:00:11"
-                                     :target-mac "02:00:00:00:00:22"
-                                     :spoofed-ip "192.0.2.1"
-                                     :target-ip "192.0.2.10")))
-           (outcome
-             (handler-case
-                 (progn
-                   (nrecon.attack:run-attack
-                    job
-                    (list :target-lab-p t
-                          :audit-fn (lambda (record)
-                                      (declare (ignore record))
-                                      t)
-                          :sender (lambda (packet timeout)
-                                    (declare (ignore packet timeout))
-                                    (setf sent t)))))
-               (nrecon.attack:attack-authorization-denied () :denied))))
-      (expect outcome :to-be :denied)
-      (expect sent :to-be nil))))
+    (let* ((audit-path
+             (merge-pathnames
+              (format nil "nrecon-cli-audit-~D-~A.jsonl"
+                      (get-universal-time)
+                      (gensym))
+              (uiop:temporary-directory)))
+           (filesystem (cl-boundary-kit:make-filesystem)))
+      (unwind-protect
+           (progn
+             (multiple-value-bind (code output error-output)
+                 (%invoke-cli (list "--format" "json"
+                                    "attack"
+                                    "--action" "arp-spoof"
+                                    "--audit-file" (namestring audit-path)
+                                    "--source-mac" "02:00:00:00:00:11"
+                                    "--target-mac" "02:00:00:00:00:22"
+                                    "--spoofed-ip" "192.0.2.1"
+                                    "192.0.2.10"))
+               (expect code :to-be 2)
+               (expect (%contains output "\"authorized\":false") :to-be t)
+               (expect (%contains error-output "nrecon attack audit") :to-be t))
+             (let ((audit (cl-boundary-kit:filesystem-read-file
+                           filesystem audit-path :external-format :utf-8)))
+               (expect (%contains audit "\"authorized\":false") :to-be t)
+               (expect (%contains audit "\"event\":\"outbound-packet-attempt\"")
+                       :to-be t))
+             (let* ((sent nil)
+                    (job (make-job :id "cli-deny"
+                                   :target "192.0.2.10"
+                                   :options (list :action :arp-spoof
+                                                  :source-mac "02:00:00:00:00:11"
+                                                  :target-mac "02:00:00:00:00:22"
+                                                  :spoofed-ip "192.0.2.1"
+                                                  :target-ip "192.0.2.10")))
+                    (outcome
+                      (handler-case
+                          (progn
+                            (nrecon.attack:run-attack
+                             job
+                             (list :target-lab-p t
+                                   :audit-fn (lambda (record)
+                                               (declare (ignore record))
+                                               :persisted)
+                                   :sender (lambda (packet timeout)
+                                             (declare (ignore packet timeout))
+                                             (setf sent t))))
+                            :returned)
+                        (nrecon.attack:attack-authorization-denied ()
+                          :denied))))
+               (expect outcome :to-be :denied)
+               (expect sent :to-be nil)))
+        (cl-boundary-kit:filesystem-delete-file filesystem audit-path)))))
 
 (describe "MCP console input bounds"
   (it "counts UTF-8 bytes before completing a line"
