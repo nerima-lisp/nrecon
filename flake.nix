@@ -19,6 +19,8 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    cl-date-kit.follows = "cl-concurrent-kit/cl-date-kit";
+
     cl-boundary-kit = {
       url = "github:nerima-lisp/cl-boundary-kit/v2.3.0";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -37,6 +39,11 @@
       url = "github:nerima-lisp/cl-weave/v1.4.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    cl-json-kit = {
+      url = "github:nerima-lisp/cl-json-kit/v1.0.0";
+      flake = false;
+    };
   };
 
   outputs =
@@ -46,9 +53,11 @@
       cl-nix-forge,
       cl-dataflow-kit,
       cl-concurrent-kit,
+      cl-date-kit,
       cl-boundary-kit,
       cl-log-kit,
       cl-weave,
+      cl-json-kit,
     }:
     let
       systems = [
@@ -62,20 +71,28 @@
       pname = "nrecon";
       asd = ./nrecon.asd;
       root = ./.;
-      lispSystem = "nrecon/core";
+      lispSystem = "nrecon/wire";
 
-      lispDependencies =
-        ctx: [
-          cl-dataflow-kit.packages.${ctx.system}.default
-          cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
-          cl-boundary-kit.packages.${ctx.system}.cl-boundary-kit
-          cl-log-kit.packages.${ctx.system}.cl-log-kit
-        ];
+      lispDependencies = ctx: [
+        cl-dataflow-kit.packages.${ctx.system}.default
+        cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
+        cl-date-kit.packages.${ctx.system}.cl-date-kit
+        cl-boundary-kit.packages.${ctx.system}.cl-boundary-kit
+        cl-log-kit.packages.${ctx.system}.cl-log-kit
+          (ctx.cl.fromNixpkgsLisp {
+            drv = ctx.pkgs.sbcl.buildASDFSystem {
+              pname = "cl-json-kit";
+              version = "1.0.0";
+              src = cl-json-kit;
+              systems = [ "cl-json-kit" ];
+            };
+            lispImplementation = "sbcl";
+          })
+      ];
 
-      lispCheckDependencies =
-        ctx: [
-          cl-weave.packages.${ctx.system}.cl-weave
-        ];
+      lispCheckDependencies = ctx: [
+        cl-weave.packages.${ctx.system}.cl-weave
+      ];
 
       meta = {
         description = "Core of nrecon, an authorized security testing toolkit";

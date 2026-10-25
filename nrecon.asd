@@ -38,10 +38,20 @@
   :components ())
 
 (asdf:defsystem "nrecon/wire"
-  :depends-on
-  ("nrecon/core" "cl-json-kit")
+  :depends-on ("nrecon/core" "cl-json-kit" "cl-boundary-kit"
+               "cl-concurrent-kit" "cl-date-kit")
+  :serial t
   :pathname "src/wire/"
-  :components ())
+  :components
+  ((:file "package")
+   (:file "json-values")
+   (:file "results")
+   (:file "describe")
+   (:file "dry-run")
+   (:file "io")
+   (:file "mcp"))
+  :in-order-to
+  ((asdf:test-op (asdf:test-op "nrecon/wire-test"))))
 
 (asdf:defsystem "nrecon/tui"
   :depends-on
@@ -71,3 +81,11 @@
   :perform (asdf:test-op (operation system)
     (declare (ignore operation system))
     (uiop:symbol-call :nrecon/core-test :run-tests)))
+(asdf:defsystem "nrecon/wire-test"
+  :depends-on ("nrecon/wire" "cl-weave")
+  :serial t
+  :pathname "src/wire/"
+  :components ((:file "wire-tests"))
+  :perform (asdf:test-op (operation system)
+    (declare (ignore operation system))
+    (uiop:symbol-call :nrecon/wire-test :run-tests)))

@@ -710,6 +710,23 @@
       }
     },
     "cl-json-kit_3": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1784983583,
+        "narHash": "sha256-e2Y1Ajgtbqnv4xBCtTUdL0gCxlyJyNb3XQzyJsuyR0I=",
+        "owner": "nerima-lisp",
+        "repo": "cl-json-kit",
+        "rev": "62a3164ab812badf7dcbf94f4b4e4eda2ecd5fb1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nerima-lisp",
+        "ref": "v1.0.0",
+        "repo": "cl-json-kit",
+        "type": "github"
+      }
+    },
+    "cl-json-kit_4": {
       "inputs": {
         "cl-nix-forge": [
           "cl-log-kit",
@@ -798,7 +815,7 @@
           "cl-date-kit"
         ],
         "cl-host-kit": "cl-host-kit_9",
-        "cl-json-kit": "cl-json-kit_3",
+        "cl-json-kit": "cl-json-kit_4",
         "cl-nix-forge": "cl-nix-forge_10",
         "cl-weave": "cl-weave_11",
         "nixpkgs": [
@@ -2104,6 +2121,11 @@
         "cl-boundary-kit": "cl-boundary-kit",
         "cl-concurrent-kit": "cl-concurrent-kit",
         "cl-dataflow-kit": "cl-dataflow-kit",
+        "cl-date-kit": [
+          "cl-concurrent-kit",
+          "cl-date-kit"
+        ],
+        "cl-json-kit": "cl-json-kit_3",
         "cl-log-kit": "cl-log-kit_4",
         "cl-nix-forge": "cl-nix-forge_11",
         "cl-weave": "cl-weave_12",
