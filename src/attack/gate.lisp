@@ -4,10 +4,15 @@
   ((action :initarg :action :reader attack-authorization-denied-action)
    (reason :initarg :reason :reader attack-authorization-denied-reason))
   (:report (lambda (condition stream)
-             (format stream "Authorization denied for ~A: ~A."
-                     (%action-name
-                      (attack-authorization-denied-action condition))
-                     (attack-authorization-denied-reason condition)))))
+             (let ((action (attack-authorization-denied-action condition))
+                   (reason (attack-authorization-denied-reason condition)))
+               (format stream "Authorization denied for ~A: ~A."
+                       (%audit-safe-string
+                        (if (or (stringp action) (symbolp action))
+                            (%action-name action)
+                            action)
+                        64)
+                       (%audit-safe-string reason 64))))))
 
 (define-condition attack-audit-failure (error) ()
   (:report "Attack audit callback rejected the outbound packet attempt."))
@@ -113,15 +118,27 @@
 
 (defun authorize-and-send (policy action target audit-fn packet sender
                            &key (timeout 1.0) deadline)
-  "Authorize, persist the decision, then inject one packet through the network boundary.
-AUDIT-FN receives sanitized metadata and must return :PERSISTED only after
-durable persistence. SENDER accepts packet bytes and a timeout in seconds."
-  (%check-octets packet)
+  "Authorize the packet snapshot, persist its decision, then inject those same bytes.
+TARGET is a strict expected-destination assertion. It does not supply authorization
+or lab status. AUDIT-FN must return :PERSISTED only after durable persistence.
+SENDER accepts packet bytes and a timeout in seconds."
+  (check-type target authorization-target)
   (check-type sender function)
-  (let ((effective-deadline (or deadline (%deadline timeout))))
-    (%authorize-and-audit policy action target audit-fn packet)
-    (%send-at-boundary sender packet
-                       (%remaining-timeout effective-deadline))))
+  (let* ((packet-snapshot (copy-seq (%check-octets packet)))
+         (effective-deadline (or deadline (%deadline timeout))))
+    (multiple-value-bind (actual-host actual-octets)
+        (%attack-packet-destination-address packet-snapshot)
+      (unless (equalp (nrecon.core:authorization-target-host target) actual-host)
+        (error 'attack-authorization-denied
+               :action action
+               :reason "Expected destination does not match packet destination."))
+      (let ((packet-target
+              (make-authorization-target
+               :host actual-host
+               :lab-p (%trusted-lab-destination-p policy actual-octets))))
+        (%authorize-and-audit policy action packet-target audit-fn packet-snapshot)
+        (%send-at-boundary sender packet-snapshot
+                           (%remaining-timeout effective-deadline))))))
 
 (defun %pcap-open-at-boundary (interface timeout)
   (let ((boundary
@@ -172,16 +189,13 @@ durable persistence. SENDER accepts packet bytes and a timeout in seconds."
       (progn
         (unless interface
           (error "An interface or an injected sender is required for active packet injection."))
-        (let ((effective-deadline (or deadline (%deadline timeout))))
-          (%authorize-and-audit policy action target audit-fn packet)
-          (let ((injector
-                  (%pcap-open-at-boundary
-                   interface (%remaining-timeout effective-deadline))))
-            (unwind-protect
-                 (%send-at-boundary
-                  (lambda (bytes send-timeout)
-                    (cl-pcap-kit:injector-send injector bytes
-                                               :timeout send-timeout))
-                  packet
-                  (%remaining-timeout effective-deadline))
-              (%pcap-close-at-boundary injector timeout)))))))
+        (authorize-and-send
+         policy action target audit-fn packet
+         (lambda (bytes send-timeout)
+           (let ((injector
+                   (%pcap-open-at-boundary interface send-timeout)))
+             (unwind-protect
+                  (cl-pcap-kit:injector-send injector bytes
+                                             :timeout send-timeout)
+               (%pcap-close-at-boundary injector timeout))))
+         :timeout timeout :deadline deadline))))

@@ -15,9 +15,12 @@
 (defun %test-target (host)
   (nrecon.core:make-authorization-target :host host :lab-p t))
 
-(defun %test-packet ()
-  (make-array 3 :element-type '(unsigned-byte 8)
-                :initial-contents '(1 2 3)))
+(defun %test-packet (&optional (target-ip "192.0.2.10"))
+  (build-arp-reply
+   :source-mac "02:00:00:00:00:11"
+   :source-ip "192.0.2.1"
+   :target-mac "02:00:00:00:00:22"
+   :target-ip target-ip))
 
 (defun %deny-result (thunk)
   (handler-case
@@ -108,7 +111,7 @@
                       (nreverse events))
               :to-equal (list :audit))
       (expect (getf (second (first events)) :authorized) :to-be nil)
-      (expect (getf (second (first events)) :packet-bytes) :to-be nil)))
+      (expect (getf (second (first events)) :packet-length) :to-be 42)))
   (it "rejects a target outside the allowlist before invoking the sender"
     (let ((sent nil)
           (audited nil))
@@ -122,7 +125,7 @@
              (declare (ignore record))
              (setf audited t)
              :persisted)
-           (%test-packet)
+           (%test-packet "198.51.100.10")
            (lambda (bytes timeout)
              (declare (ignore bytes timeout))
              (setf sent t)))))
@@ -160,7 +163,7 @@
         (lambda (record)
           (expect (getf record :action) :to-equal "arp-spoof")
           (expect (getf record :authorized) :to-be t)
-          (expect (getf record :packet-length) :to-be 3)
+          (expect (getf record :packet-length) :to-be 42)
           (push :audit events)
           :persisted)
         packet
@@ -168,7 +171,7 @@
           (declare (ignore timeout))
           (push :send events)
           (length bytes)))
-       :to-be 3)
+       :to-be 42)
       (expect (nreverse events) :to-equal (list :audit :send))))
   (it "removes controls and bounds user values before passing audit metadata"
     (let* ((control-prefix
@@ -180,15 +183,14 @@
            (expected-host (concatenate 'string "abcd"
                                        (make-string 252 :initial-element #\x)))
            (action (concatenate 'string "arp" (string (code-char 10)) "-spoof"))
-           (target (%test-target host))
-           (policy (%test-policy action host))
            (record nil)
            (sent nil))
       (expect
        (%deny-result
         (lambda ()
           (authorize-and-send
-           policy action target
+           (%test-policy :arp-spoof "192.0.2.10")
+           action (%test-target "192.0.2.10")
            (lambda (audit-record)
              (setf record audit-record)
              :persisted)
@@ -198,10 +200,14 @@
              (setf sent t)))))
        :to-be :denied)
       (expect (getf record :action) :to-equal "arp-spoof")
-      (expect (getf record :target) :to-equal expected-host)
-      (expect (length (getf record :target)) :to-be 256)
+      (expect (getf record :target) :to-equal "192.0.2.10")
+      (expect (getf record :authorized) :to-be nil)
       (expect (<= (length (getf record :reason)) 64) :to-be t)
-      (expect sent :to-be nil)))
+      (expect sent :to-be nil)
+      (expect (nrecon.attack::%audit-safe-string host 256)
+              :to-equal expected-host)
+      (expect (length (nrecon.attack::%audit-safe-string host 256))
+              :to-be 256)))
   (it "rejects a relay target that differs from the rewritten frame destination"
     (let* ((frame
              (build-dns-response-frame
@@ -415,7 +421,116 @@
              (nrecon.core:make-authorization-target
               :host "host.\"quoted" :lab-p t)
              nil 42)))
-      (expect (not (null (search "host.\\\"quoted" plan))) :to-be t))))
+      (expect (not (null (search "host.\\\"quoted" plan))) :to-be t)))
+  (it "rejects an allowlisted expected target when the packet encodes another destination"
+    (let* ((policy (%test-policy :arp-spoof "192.0.2.10"))
+           (packet (%test-packet "198.51.100.10"))
+           (audited nil)
+           (sent nil))
+      (multiple-value-bind (actual-host actual-octets)
+          (nrecon.attack::%attack-packet-destination-address packet)
+        (declare (ignore actual-octets))
+        (expect actual-host :to-equal "198.51.100.10"))
+      (expect (nrecon.core:authorization-policy-allowlist policy)
+              :to-equal (list "192.0.2.10"))
+      (expect
+       (%deny-result
+        (lambda ()
+          (authorize-and-send
+           policy :arp-spoof (%test-target "192.0.2.10")
+           (lambda (record)
+             (declare (ignore record))
+             (setf audited t)
+             :persisted)
+           packet
+           (lambda (bytes timeout)
+             (declare (ignore bytes timeout))
+             (setf sent t)))))
+       :to-be :denied)
+      (expect audited :to-be nil)
+      (expect sent :to-be nil)))
+  (it "derives lab authorization from the packet despite a false caller lab flag"
+    (let* ((policy (%test-policy :arp-spoof "192.0.2.10"))
+           (packet (%test-packet))
+           (target (nrecon.core:make-authorization-target
+                    :host "192.0.2.10" :lab-p nil))
+           (record nil)
+           (sent nil)
+           (sent-destination nil)
+           (events nil)
+           (result
+             (authorize-and-send
+              policy :arp-spoof target
+              (lambda (audit-record)
+                (setf record audit-record)
+                (push :audit events)
+                :persisted)
+              packet
+              (lambda (bytes timeout)
+                (declare (ignore timeout))
+                (setf sent (copy-seq bytes))
+                (multiple-value-bind (actual-host actual-octets)
+                    (nrecon.attack::%attack-packet-destination-address bytes)
+                  (declare (ignore actual-octets))
+                  (setf sent-destination actual-host))
+                (push :send events)
+                (length bytes)))))
+      (expect (nrecon.core:authorization-policy-allowlist policy)
+              :to-equal (list "192.0.2.10"))
+      (expect result :to-be 42)
+      (expect (equalp sent packet) :to-be t)
+      (expect sent-destination :to-equal "192.0.2.10")
+      (expect (getf record :target) :to-equal "192.0.2.10")
+      (expect (getf record :authorized) :to-be t)
+      (expect (nreverse events) :to-equal (list :audit :send))))
+  (it "sends the authorized packet snapshot after audit mutates shared options"
+    (let* ((options (make-hash-table))
+           (policy (%test-policy :arp-spoof "192.0.2.10"))
+           (expected-packet
+             (build-arp-reply
+              :source-mac "02:00:00:00:00:11"
+              :source-ip "192.0.2.1"
+              :target-mac "02:00:00:00:00:22"
+              :target-ip "192.0.2.10"))
+           (mutated nil)
+           (record nil)
+           (sent nil)
+           (sent-destination nil)
+           (result nil))
+      (setf (gethash :action options) :arp-spoof
+            (gethash :source-mac options) "02:00:00:00:00:11"
+            (gethash :spoofed-ip options) "192.0.2.1"
+            (gethash :target-mac options) "02:00:00:00:00:22"
+            (gethash :target-ip options) "192.0.2.10")
+      (setf result
+            (run-attack
+             options
+             (list :authorization-policy policy
+                   :target-lab-p nil
+                   :audit-fn
+                   (lambda (audit-record)
+                     (setf record audit-record
+                           (gethash :target-ip options) "198.51.100.10"
+                           mutated t)
+                     :persisted)
+                   :sender
+                   (lambda (bytes timeout)
+                     (declare (ignore timeout))
+                     (setf sent (copy-seq bytes))
+                     (multiple-value-bind (actual-host actual-octets)
+                         (nrecon.attack::%attack-packet-destination-address bytes)
+                       (declare (ignore actual-octets))
+                       (setf sent-destination actual-host))
+                     (length bytes)))))
+      (expect (gethash :target-ip options) :to-equal "198.51.100.10")
+      (expect mutated :to-be t)
+      (expect (nrecon.core:authorization-policy-allowlist policy)
+              :to-equal (list "192.0.2.10"))
+      (expect result :to-be 42)
+      (expect (equalp sent expected-packet) :to-be t)
+      (expect sent-destination :to-equal "192.0.2.10")
+      (expect (getf record :target) :to-equal "192.0.2.10")
+      (expect (getf record :authorized) :to-be t))))
 
 (defun run-tests ()
   (let* ((plan (cl-weave:list-tests :reporter :sexp
