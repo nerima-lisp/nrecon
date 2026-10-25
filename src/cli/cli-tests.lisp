@@ -107,6 +107,29 @@
       (expect outcome :to-be :denied)
       (expect sent :to-be nil))))
 
+(describe "MCP console input bounds"
+  (it "counts UTF-8 bytes before completing a line"
+    (let ((nrecon.cli::*mcp-max-line-bytes* 2)
+          (console
+            (make-instance
+             'nrecon.cli::%mcp-console
+             :delegate (cl-boundary-kit:make-test-console)
+             :input-stream (make-string-input-stream (format nil "é~%")))))
+      (multiple-value-bind (line status)
+          (cl-boundary-kit:console-read-line console)
+        (expect line :to-equal "é")
+        (expect status :to-be :line)))
+    (let ((nrecon.cli::*mcp-max-line-bytes* 2)
+          (console
+            (make-instance
+             'nrecon.cli::%mcp-console
+             :delegate (cl-boundary-kit:make-test-console)
+             :input-stream (make-string-input-stream (format nil "éé~%")))))
+      (multiple-value-bind (line status)
+          (cl-boundary-kit:console-read-line console)
+        (expect line :to-be-null)
+        (expect status :to-be :too-large)))))
+
 (defun run-tests ()
   (let* ((plan (cl-weave:list-tests
                 :reporter :sexp

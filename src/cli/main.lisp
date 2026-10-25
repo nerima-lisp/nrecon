@@ -28,11 +28,12 @@
   (if value t json-kit:+json-false+))
 
 (defun %emit-results (invocation results)
-  (write-string
-   (nrecon.wire:render-results results :format (%format-keyword invocation))
-   (invocation-stdout invocation))
-  (terpri (invocation-stdout invocation))
-  (finish-output (invocation-stdout invocation)))
+  (cl-boundary-kit:console-write-line
+   (cl-boundary-kit:make-console
+    :input *standard-input*
+    :output (invocation-stdout invocation)
+    :error (invocation-stderr invocation))
+   (nrecon.wire:render-results results :format (%format-keyword invocation))))
 
 (defun %emit-result (invocation id value &key (status :completed) metadata)
   (%emit-results invocation
@@ -44,10 +45,12 @@
 (defun %emit-plan (invocation plan)
   (if (eq (%format-keyword invocation) :table)
       (%emit-result invocation "dry-run" plan)
-      (progn
-        (write-string plan (invocation-stdout invocation))
-        (terpri (invocation-stdout invocation))
-        (finish-output (invocation-stdout invocation)))))
+      (cl-boundary-kit:console-write-line
+       (cl-boundary-kit:make-console
+        :input *standard-input*
+        :output (invocation-stdout invocation)
+        :error (invocation-stderr invocation))
+       plan)))
 
 (defun %parse-uri-host (uri)
   (let ((scheme-end (search "://" uri)))
@@ -220,8 +223,18 @@
     options))
 
 (defun %attack-audit (invocation record)
-  (format (invocation-stderr invocation) "nrecon attack audit: ~S~%" record)
-  (finish-output (invocation-stderr invocation))
+  (cl-boundary-kit:console-write-error
+   (make-instance
+    '%mcp-console
+    :delegate
+    (cl-boundary-kit:make-console
+     :input *standard-input*
+     :output (invocation-stdout invocation)
+     :error (invocation-stderr invocation))
+    :input-stream *standard-input*
+    :output-stream (invocation-stdout invocation)
+    :error-stream (invocation-stderr invocation))
+   (format nil "nrecon attack audit: ~S" record))
   t)
 
 (defun %attack-command (invocation)
@@ -268,11 +281,12 @@
 (defun %describe-command (invocation)
   (let ((manifest (nrecon.wire:describe-manifest)))
     (if (option-value invocation :json)
-        (progn
-          (write-string (json-kit:stringify manifest :sort-keys t)
-                        (invocation-stdout invocation))
-          (terpri (invocation-stdout invocation))
-          (finish-output (invocation-stdout invocation)))
+        (cl-boundary-kit:console-write-line
+         (cl-boundary-kit:make-console
+          :input *standard-input*
+          :output (invocation-stdout invocation)
+          :error (invocation-stderr invocation))
+         (json-kit:stringify manifest :sort-keys t))
         (%emit-results
          invocation
          (map 'list (lambda (module)
@@ -323,22 +337,59 @@
                   (return (values nil :too-large)))
                 (write-char character buffer))))))
 
+(defclass %mcp-console ()
+  ((delegate :initarg :delegate :reader %mcp-console-delegate)
+   (input-stream :initarg :input-stream :reader %mcp-console-input-stream)
+   (output-stream :initarg :output-stream :initform nil
+                  :reader %mcp-console-output-stream)
+   (error-stream :initarg :error-stream :initform nil
+                 :reader %mcp-console-error-stream)))
+
+(defmethod cl-boundary-kit:console-read-line ((console %mcp-console))
+  (%read-mcp-line (%mcp-console-input-stream console)))
+
+(defmethod cl-boundary-kit:console-write-line ((console %mcp-console) line)
+  (prog1
+      (cl-boundary-kit:console-write-line (%mcp-console-delegate console) line)
+    (let ((stream (%mcp-console-output-stream console)))
+      (when stream (finish-output stream)))))
+
+(defmethod cl-boundary-kit:console-write ((console %mcp-console) text)
+  (prog1
+      (cl-boundary-kit:console-write (%mcp-console-delegate console) text)
+    (let ((stream (%mcp-console-output-stream console)))
+      (when stream (finish-output stream)))))
+
+(defmethod cl-boundary-kit:console-write-error ((console %mcp-console) line)
+  (prog1
+      (cl-boundary-kit:console-write-error (%mcp-console-delegate console) line)
+    (let ((stream (%mcp-console-error-stream console)))
+      (when stream (finish-output stream)))))
+
 (defun %serve-command (invocation)
-  (let* ((output (invocation-stdout invocation))
+  (let* ((console
+           (make-instance
+            '%mcp-console
+            :delegate
+            (cl-boundary-kit:make-console
+             :input *standard-input*
+             :output (invocation-stdout invocation)
+             :error (invocation-stderr invocation))
+            :input-stream *standard-input*
+            :output-stream (invocation-stdout invocation)
+            :error-stream (invocation-stderr invocation)))
          (policy (%authorization-policy invocation))
          (lab-p (option-value invocation :lab)))
     (loop
       (multiple-value-bind (line status)
-          (%read-mcp-line *standard-input*)
+          (cl-boundary-kit:console-read-line console)
         (case status
           (:eof (return))
           (:too-large
-           (write-string
+           (cl-boundary-kit:console-write-line
+            console
             (json-kit:stringify (%mcp-error -32700 "Parse error.")
-                                :sort-keys t)
-            output)
-           (terpri output)
-           (finish-output output)
+                                :sort-keys t))
            (return-from %serve-command 2))
           (:line
            (let* ((request (handler-case
@@ -351,9 +402,9 @@
                                  :authorization-policy policy
                                  :target-lab-p lab-p))))
              (when response
-               (write-string (json-kit:stringify response :sort-keys t) output)
-               (terpri output)
-               (finish-output output)))))))
+               (cl-boundary-kit:console-write-line
+                console
+                (json-kit:stringify response :sort-keys t))))))))
     0))
 
 (defun %safe-handler (function)
@@ -362,8 +413,12 @@
         (let ((result (funcall function invocation)))
           (if (integerp result) result 0))
       (error (condition)
-        (format (invocation-stderr invocation) "nrecon: ~A~%" condition)
-        (finish-output (invocation-stderr invocation))
+        (cl-boundary-kit:console-write-error
+         (cl-boundary-kit:make-console
+          :input *standard-input*
+          :output (invocation-stdout invocation)
+          :error (invocation-stderr invocation))
+         (format nil "nrecon: ~A" condition))
         2))))
 
 (defun make-app ()

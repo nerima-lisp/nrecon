@@ -87,7 +87,7 @@
 
 (asdf:defsystem "nrecon/cli"
   :depends-on
-  ("nrecon/core" "cl-cli" "cl-json-kit" "cl-concurrent-kit"
+  ("nrecon/core" "cl-cli" "cl-json-kit" "cl-concurrent-kit" "cl-boundary-kit"
    "nrecon/fuzz" "nrecon/net" "nrecon/attack" "nrecon/wire")
   :serial t
   :pathname "src/cli/"
