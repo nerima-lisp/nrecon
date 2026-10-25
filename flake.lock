@@ -177,6 +177,23 @@
       }
     },
     "cl-cli": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1790404112,
+        "narHash": "sha256-qUsAMAUqWvshDnriY8sLrZa6tspSQAaNjRJWZQqAEpw=",
+        "owner": "nerima-lisp",
+        "repo": "cl-cli",
+        "rev": "40f2072b423658031a3bf2bdaf48cc769d4a70f6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nerima-lisp",
+        "ref": "v1.4.0",
+        "repo": "cl-cli",
+        "type": "github"
+      }
+    },
+    "cl-cli_2": {
       "inputs": {
         "cl-boundary-kit": "cl-boundary-kit_3",
         "cl-host-kit": "cl-host-kit_3",
@@ -211,7 +228,7 @@
         "type": "github"
       }
     },
-    "cl-cli_2": {
+    "cl-cli_3": {
       "inputs": {
         "cl-boundary-kit": "cl-boundary-kit_6",
         "cl-host-kit": "cl-host-kit_6",
@@ -285,7 +302,7 @@
     "cl-concurrent-kit": {
       "inputs": {
         "cl-boundary-kit": "cl-boundary-kit_2",
-        "cl-cli": "cl-cli",
+        "cl-cli": "cl-cli_2",
         "cl-date-kit": "cl-date-kit",
         "cl-host-kit": "cl-host-kit_4",
         "cl-nix-forge": "cl-nix-forge_4",
@@ -313,7 +330,7 @@
     "cl-concurrent-kit_2": {
       "inputs": {
         "cl-boundary-kit": "cl-boundary-kit_5",
-        "cl-cli": "cl-cli_2",
+        "cl-cli": "cl-cli_3",
         "cl-date-kit": "cl-date-kit_2",
         "cl-host-kit": "cl-host-kit_7",
         "cl-nix-forge": "cl-nix-forge_6",
@@ -1017,16 +1034,16 @@
         "treefmt-nix": "treefmt-nix_39"
       },
       "locked": {
-        "lastModified": 1785825792,
-        "narHash": "sha256-FjpTPYXj5BINxpgFbNqKQgeB6p/ANR/1N8T4lSHS7kU=",
+        "lastModified": 1790475278,
+        "narHash": "sha256-0AEyZnnjxm+eEjMXYZxo16t4fZdgMEBZOOoc2xMA3H0=",
         "owner": "nerima-lisp",
         "repo": "cl-nix-forge",
-        "rev": "df1e772cda1efcdb90297b49ca1a25b396b8bdd7",
+        "rev": "554ceba36e962d9c942058f9333edc5639b911b6",
         "type": "github"
       },
       "original": {
         "owner": "nerima-lisp",
-        "ref": "v0.5.0",
+        "ref": "v0.6.1",
         "repo": "cl-nix-forge",
         "type": "github"
       }
@@ -2497,6 +2514,7 @@
       "inputs": {
         "cl-boundary-kit": "cl-boundary-kit",
         "cl-cffi-kit": "cl-cffi-kit",
+        "cl-cli": "cl-cli",
         "cl-codec-kit": "cl-codec-kit",
         "cl-concurrent-kit": "cl-concurrent-kit",
         "cl-dataflow-kit": "cl-dataflow-kit",
@@ -2505,6 +2523,10 @@
           "cl-date-kit"
         ],
         "cl-deflate-kit": "cl-deflate-kit",
+        "cl-host-kit": [
+          "cl-dataflow-kit",
+          "cl-host-kit"
+        ],
         "cl-http-kit": "cl-http-kit",
         "cl-json-kit": "cl-json-kit_3",
         "cl-log-kit": "cl-log-kit_4",
@@ -3550,11 +3572,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1785360170,
-        "narHash": "sha256-XE1lKgQ3eIO3E7zWryqcRsax+mYXod/5RHBn4YaR9YE=",
+        "lastModified": 1785945821,
+        "narHash": "sha256-NLSyTCW4K4ofhNBllt3omPasm6QpralXH1DBZOc91Dw=",
         "owner": "numtide",
         "repo": "treefmt-nix",
-        "rev": "d1187f8bc71fb8aab02395869ec3f5c1920f75c0",
+        "rev": "ae7910970dddc408fe6ab1c8e4b277bb21d72dc0",
         "type": "github"
       },
       "original": {

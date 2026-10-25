@@ -87,15 +87,13 @@
 
 (asdf:defsystem "nrecon/cli"
   :depends-on
-  ("nrecon/core"
-   "cl-cli"
-   "nrecon/fuzz"
-   "nrecon/net"
-   "nrecon/attack"
-   "nrecon/wire"
-   "nrecon/tui")
+  ("nrecon/core" "cl-cli" "cl-json-kit" "cl-concurrent-kit"
+   "nrecon/fuzz" "nrecon/net" "nrecon/attack" "nrecon/wire")
+  :serial t
   :pathname "src/cli/"
-  :components ())
+  :components ((:file "package") (:file "main"))
+  :in-order-to
+  ((asdf:test-op (asdf:test-op "nrecon/cli-test"))))
 
 (asdf:defsystem "nrecon/core-test"
   :depends-on ("nrecon/core" "cl-weave")
@@ -139,3 +137,16 @@
   :perform (asdf:test-op (operation system)
     (declare (ignore operation system))
     (uiop:symbol-call :nrecon/fuzz-test :run-tests)))
+(asdf:defsystem "nrecon/cli-test"
+  :depends-on ("nrecon/cli" "cl-weave")
+  :serial t
+  :pathname "src/cli/"
+  :components ((:file "cli-tests"))
+  :perform (asdf:test-op (operation system)
+                         (declare (ignore operation system))
+                         (uiop:symbol-call :nrecon/cli-test :run-tests)))
+(asdf:defsystem "nrecon/cli/executable"
+  :depends-on ("nrecon/cli")
+  :build-operation "program-op"
+  :build-pathname "nrecon"
+  :entry-point "nrecon.cli:main")

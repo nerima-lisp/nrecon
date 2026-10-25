@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     cl-nix-forge = {
-      url = "github:nerima-lisp/cl-nix-forge/v0.5.0";
+      url = "github:nerima-lisp/cl-nix-forge/v0.6.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -18,6 +18,13 @@
       url = "github:nerima-lisp/cl-concurrent-kit/v0.6.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    cl-cli = {
+      url = "github:nerima-lisp/cl-cli/v1.4.0";
+      flake = false;
+    };
+
+    cl-host-kit.follows = "cl-dataflow-kit/cl-host-kit";
 
     cl-codec-kit = {
       url = "github:nerima-lisp/cl-codec-kit/v0.5.0";
@@ -94,6 +101,8 @@
       cl-nix-forge,
       cl-dataflow-kit,
       cl-concurrent-kit,
+      cl-cli,
+      cl-host-kit,
       cl-codec-kit,
       cl-date-kit,
       cl-boundary-kit,
@@ -122,6 +131,10 @@
       root = ./.;
       sourceInclude = [ ./src/net/fixtures/discovery.pcap ];
       lispSystem = "nrecon/wire";
+      executable = {
+        lispSystem = "nrecon/cli/executable";
+        programPath = "nrecon";
+      };
 
       lispDependencies =
         ctx:
@@ -184,10 +197,22 @@
             };
             lispImplementation = "sbcl";
           };
+          hostKit = forge.lispDerivation {
+            lispSystem = "cl-host-kit";
+            version = forge.fromAsdSystem "${cl-host-kit}/cl-host-kit.asd";
+            src = cl-host-kit;
+          };
+          cliKit = forge.lispDerivation {
+            lispSystem = "cl-cli";
+            version = forge.fromAsdSystem "${cl-cli}/cl-cli.asd";
+            src = cl-cli;
+            lispDependencies = [ hostKit ];
+          };
         in
         [
           cl-dataflow-kit.packages.${ctx.system}.default
           cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
+          cliKit
           cl-date-kit.packages.${ctx.system}.cl-date-kit
           cl-boundary-kit.packages.${ctx.system}.cl-boundary-kit
           cl-log-kit.packages.${ctx.system}.cl-log-kit
