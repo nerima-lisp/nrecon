@@ -530,7 +530,66 @@
       (expect (equalp sent expected-packet) :to-be t)
       (expect sent-destination :to-equal "192.0.2.10")
       (expect (getf record :target) :to-equal "192.0.2.10")
-      (expect (getf record :authorized) :to-be t))))
+      (expect (getf record :authorized) :to-be t)))
+  (it "does not expose the authorized snapshot to a mutating sender"
+    (let* ((authorized-snapshot (%test-packet))
+           (expected-packet (copy-seq authorized-snapshot))
+           (sender-buffer nil)
+           (sender-input nil)
+           (record nil)
+           (public-sender-buffer nil)
+           (public-sender-input nil))
+      (nrecon.attack::%send-at-boundary
+       (lambda (bytes timeout)
+         (declare (ignore timeout))
+         (setf sender-buffer bytes
+               sender-input (copy-seq bytes)
+               (aref bytes 38) 198
+               (aref bytes 39) 51
+               (aref bytes 40) 100
+               (aref bytes 41) 10)
+         (length bytes))
+       authorized-snapshot 1.0)
+      (expect (eq sender-buffer authorized-snapshot) :to-be nil)
+      (expect (equalp sender-input expected-packet) :to-be t)
+      (expect (equalp authorized-snapshot expected-packet) :to-be t)
+      (multiple-value-bind (snapshot-host snapshot-octets)
+          (nrecon.attack::%attack-packet-destination-address authorized-snapshot)
+        (declare (ignore snapshot-octets))
+        (expect snapshot-host :to-equal "192.0.2.10"))
+      (multiple-value-bind (sender-host sender-octets)
+          (nrecon.attack::%attack-packet-destination-address sender-buffer)
+        (declare (ignore sender-octets))
+        (expect sender-host :to-equal "198.51.100.10"))
+      (expect
+       (authorize-and-send
+        (%test-policy :arp-spoof "192.0.2.10")
+        :arp-spoof (%test-target "192.0.2.10")
+        (lambda (audit-record)
+          (setf record audit-record)
+          :persisted)
+        (%test-packet)
+        (lambda (bytes timeout)
+          (declare (ignore timeout))
+          (setf public-sender-buffer bytes
+                public-sender-input (copy-seq bytes)
+                (aref bytes 38) 198
+                (aref bytes 39) 51
+                (aref bytes 40) 100
+                (aref bytes 41) 10)
+          (length bytes)))
+       :to-be 42)
+      (expect (equalp public-sender-input expected-packet) :to-be t)
+      (multiple-value-bind (input-host input-octets)
+          (nrecon.attack::%attack-packet-destination-address public-sender-input)
+        (declare (ignore input-octets))
+        (expect input-host :to-equal "192.0.2.10"))
+      (expect (getf record :target) :to-equal "192.0.2.10")
+      (expect (getf record :authorized) :to-be t)
+      (multiple-value-bind (public-sender-host public-sender-octets)
+          (nrecon.attack::%attack-packet-destination-address public-sender-buffer)
+        (declare (ignore public-sender-octets))
+        (expect public-sender-host :to-equal "198.51.100.10")))))
 
 (defun run-tests ()
   (let* ((plan (cl-weave:list-tests :reporter :sexp

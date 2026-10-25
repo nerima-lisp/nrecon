@@ -114,6 +114,10 @@ transport headers. TARGET-HOST, when supplied, must match that destination."
                             :timeout timeout :deadline deadline)))))))
 
 (defun run-attack (input context)
+  "Run the attack described by INPUT using CONTEXT.
+The :SENDER value in CONTEXT must be a trusted injection primitive that transmits
+exactly the byte sequence it receives. Never supply an attacker-controlled value as
+:SENDER."
   (let* ((options (%job-options input))
          (action (%option options :action))
          (target-host (or (%option options :target-ip)

@@ -114,14 +114,16 @@
                       (getf request :packet)
                       timeout)))))
     (cl-boundary-kit:network-boundary-request
-     boundary (list :sender sender :packet packet) :timeout timeout)))
+     boundary (list :sender sender :packet (copy-seq packet)) :timeout timeout)))
 
 (defun authorize-and-send (policy action target audit-fn packet sender
                            &key (timeout 1.0) deadline)
   "Authorize the packet snapshot, persist its decision, then inject those same bytes.
 TARGET is a strict expected-destination assertion. It does not supply authorization
 or lab status. AUDIT-FN must return :PERSISTED only after durable persistence.
-SENDER accepts packet bytes and a timeout in seconds."
+SENDER accepts packet bytes and a timeout in seconds. SENDER is a trusted injection
+primitive that must transmit exactly the byte sequence it receives. Never provide
+an attacker-controlled value as SENDER."
   (check-type target authorization-target)
   (check-type sender function)
   (let* ((packet-snapshot (copy-seq (%check-octets packet)))
